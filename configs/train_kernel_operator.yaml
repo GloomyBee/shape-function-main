@@ -1,0 +1,11 @@
+model:
+  backbone: kernel_operator
+  hidden_dim: 64
+  num_layers: 2
+  feature_mode: minimal
+train:
+  batch_size: 32
+  epochs: 10
+  learning_rate: 0.001
+  lambda_cons: 0.0001
+  lambda_neg: 0.00001
