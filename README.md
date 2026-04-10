@@ -22,6 +22,35 @@ This repository currently implements:
 - an MLP baseline
 - a minimal training and evaluation loop
 
+## Implemented vs Planned
+
+Implemented in the current repository:
+
+- 2D only
+- fixed `k=16`
+- patch-level max-ent teacher solver with `gaussian` and `quartic_spline` priors
+- patch families:
+  - `uniform`
+  - `mildly_perturbed`
+  - `highly_random`
+  - `clustered`
+  - `boundary_truncated`
+  - `anisotropic`
+  - `sparse_dense_transition`
+- structure-preserving head
+- `kernel_operator` backbone
+- `mlp_baseline` backbone
+- minimal train/eval loop and unit tests
+
+Planned next, but not implemented yet:
+
+- variable-`k` handling and masking through the full training pipeline
+- 3D extension
+- `DeepSets` / `Set Transformer-lite`
+- `Transolver-lite`
+- OOD beta study and full paper-grade experiment suite
+- solver embedding for large-deformation meshfree analysis
+
 ## Setup
 
 ```powershell

@@ -8,16 +8,25 @@ from shape_function.models.heads.windows import wendland_c2_window
 
 
 class KernelOperatorBackbone(nn.Module):
-    def __init__(self, input_dim: int, hidden_dim: int = 64, num_layers: int = 2):
+    def __init__(
+        self,
+        input_dim: int,
+        hidden_dim: int = 64,
+        num_layers: int = 2,
+        spatial_dim: int = 2,
+        kernel_radius_scale: float = 2.0,
+    ):
         super().__init__()
         self.hidden_dim = hidden_dim
         self.num_layers = num_layers
+        self.spatial_dim = spatial_dim
+        self.kernel_radius_scale = kernel_radius_scale
         self.lift = nn.Sequential(
             nn.Linear(input_dim, hidden_dim),
             nn.GELU(),
             nn.Linear(hidden_dim, hidden_dim),
         )
-        pair_dim = hidden_dim + 2 + 2 + 1
+        pair_dim = hidden_dim + self.spatial_dim + self.spatial_dim + 1
         self.modulation = nn.ModuleList(
             [
                 nn.Sequential(
@@ -34,6 +43,10 @@ class KernelOperatorBackbone(nn.Module):
         self.double()
 
     def forward(self, node_features: torch.Tensor, rel_coords: torch.Tensor, mask: torch.Tensor | None = None) -> torch.Tensor:
+        if rel_coords.shape[-1] != self.spatial_dim:
+            raise ValueError(
+                f"Expected rel_coords last dimension {self.spatial_dim}, got {rel_coords.shape[-1]}"
+            )
         h = self.lift(node_features)
         for layer_idx in range(self.num_layers):
             h_i = h.unsqueeze(2)
@@ -51,7 +64,9 @@ class KernelOperatorBackbone(nn.Module):
                 dim=-1,
             )
             modulation = F.softplus(self.modulation[layer_idx](pair_feat).squeeze(-1))
-            kernel = wendland_c2_window((pair_dist.squeeze(-1) / 2.0).clamp_min(0.0))
+            kernel = wendland_c2_window(
+                (pair_dist.squeeze(-1) / self.kernel_radius_scale).clamp_min(0.0)
+            )
             alpha = modulation * kernel
             if mask is not None:
                 pair_mask = mask.unsqueeze(1) * mask.unsqueeze(2)

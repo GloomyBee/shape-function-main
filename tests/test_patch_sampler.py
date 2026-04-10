@@ -22,3 +22,18 @@ def test_feature_builder_modes() -> None:
     enhanced = build_patch_features(patch, feature_mode="enhanced")
     assert minimal["node_features"].shape == (16, 4)
     assert enhanced["node_features"].shape == (16, 7)
+
+
+def test_anisotropic_patch_has_small_eigen_ratio() -> None:
+    patch = sample_patch(np.random.default_rng(11), "anisotropic", k_neighbors=16)
+    assert patch["validation"]["eig_ratio"] < 0.5
+
+
+def test_sparse_dense_transition_patch_has_broad_neighbor_distance_spread() -> None:
+    patch = sample_patch(np.random.default_rng(13), "sparse_dense_transition", k_neighbors=16)
+    diffs = patch["X"][:, None, :] - patch["X"][None, :, :]
+    dists = np.linalg.norm(diffs, axis=-1)
+    dists += np.eye(dists.shape[0]) * 1.0e9
+    nearest = np.min(dists, axis=1)
+    ratio = float(np.max(nearest) / np.min(nearest))
+    assert ratio > 2.0

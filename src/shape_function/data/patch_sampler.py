@@ -12,6 +12,8 @@ PATCH_TYPES = (
     "highly_random",
     "clustered",
     "boundary_truncated",
+    "anisotropic",
+    "sparse_dense_transition",
 )
 
 
@@ -69,6 +71,16 @@ def _candidate_points(rng: np.random.Generator, patch_type: str) -> np.ndarray:
         return np.concatenate([clustered, uniform], axis=0).astype(np.float64)
     if patch_type == "boundary_truncated":
         return rng.uniform(0.0, 1.0, size=(96, 2)).astype(np.float64)
+    if patch_type == "anisotropic":
+        base = rng.uniform(-0.5, 0.5, size=(96, 2))
+        transform = np.asarray([[1.8, 0.0], [0.0, 0.35]], dtype=np.float64)
+        stretched = base @ transform.T + np.asarray([0.5, 0.5], dtype=np.float64)
+        return np.clip(stretched, 0.0, 1.0).astype(np.float64)
+    if patch_type == "sparse_dense_transition":
+        dense_center = rng.uniform([0.2, 0.2], [0.45, 0.8], size=(1, 2))
+        dense = np.clip(dense_center + rng.normal(scale=0.04, size=(70, 2)), 0.0, 1.0)
+        sparse = rng.uniform([0.55, 0.05], [1.0, 0.95], size=(26, 2))
+        return np.concatenate([dense, sparse], axis=0).astype(np.float64)
     raise ValueError(f"Unsupported patch type: {patch_type}")
 
 
