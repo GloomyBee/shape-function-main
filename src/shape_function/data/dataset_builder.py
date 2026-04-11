@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
+from typing import Any, Sequence
 
 import numpy as np
 
@@ -16,8 +16,17 @@ def build_dataset(
     feature_mode: str = "minimal",
     k_neighbors: int = 16,
     prior_type: str = "gaussian",
+    patch_types: Sequence[str] | None = None,
+    beta_range: tuple[float, float] = (0.5, 8.0),
 ) -> list[dict[str, Any]]:
-    patches = sample_patches(num_patches, seed=seed, patch_types=PATCH_TYPES, k_neighbors=k_neighbors)
+    resolved_patch_types = tuple(patch_types) if patch_types is not None else PATCH_TYPES
+    patches = sample_patches(
+        num_patches,
+        seed=seed,
+        patch_types=resolved_patch_types,
+        k_neighbors=k_neighbors,
+        beta_range=beta_range,
+    )
     dataset: list[dict[str, Any]] = []
     for patch in patches:
         teacher = solve_maxent_patch(patch["x_q"], patch["X"], patch["beta"], prior_type=prior_type)

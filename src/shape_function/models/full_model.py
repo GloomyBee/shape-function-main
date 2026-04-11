@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import Any
+
 import torch
 import torch.nn as nn
 
@@ -19,13 +21,27 @@ def build_node_features_torch(rel_hat: torch.Tensor, beta: torch.Tensor, rho_q: 
     return torch.cat(features, dim=-1)
 
 
+def feature_dim_for_mode(feature_mode: str) -> int:
+    if feature_mode == "minimal":
+        return 4
+    if feature_mode == "enhanced":
+        return 7
+    raise ValueError(f"Unsupported feature_mode: {feature_mode}")
+
+
 class ShapeFunctionModel(nn.Module):
-    def __init__(self, backbone_name: str = "kernel_operator", feature_dim: int = 4):
+    def __init__(
+        self,
+        backbone_name: str = "kernel_operator",
+        feature_dim: int = 4,
+        backbone_kwargs: dict[str, Any] | None = None,
+    ):
         super().__init__()
+        resolved_backbone_kwargs = dict(backbone_kwargs or {})
         if backbone_name == "kernel_operator":
-            self.backbone = KernelOperatorBackbone(input_dim=feature_dim)
+            self.backbone = KernelOperatorBackbone(input_dim=feature_dim, **resolved_backbone_kwargs)
         elif backbone_name == "mlp_baseline":
-            self.backbone = MLPBaselineBackbone(input_dim=feature_dim)
+            self.backbone = MLPBaselineBackbone(input_dim=feature_dim, **resolved_backbone_kwargs)
         else:
             raise ValueError(f"Unsupported backbone_name: {backbone_name}")
         self.head = StructurePreservingHead()
@@ -51,3 +67,30 @@ class ShapeFunctionModel(nn.Module):
             "r_max": r_max,
             "node_features": node_features,
         }
+
+
+def build_shape_function_model(
+    backbone_name: str = "kernel_operator",
+    feature_mode: str = "minimal",
+    hidden_dim: int | None = None,
+    num_layers: int | None = None,
+    k_neighbors: int = 16,
+) -> ShapeFunctionModel:
+    feature_dim = feature_dim_for_mode(feature_mode)
+    backbone_kwargs: dict[str, Any] = {}
+    if backbone_name == "kernel_operator":
+        if hidden_dim is not None:
+            backbone_kwargs["hidden_dim"] = hidden_dim
+        if num_layers is not None:
+            backbone_kwargs["num_layers"] = num_layers
+    elif backbone_name == "mlp_baseline":
+        backbone_kwargs["k_neighbors"] = k_neighbors
+        if hidden_dim is not None:
+            backbone_kwargs["hidden_dim"] = hidden_dim
+    else:
+        raise ValueError(f"Unsupported backbone_name: {backbone_name}")
+    return ShapeFunctionModel(
+        backbone_name=backbone_name,
+        feature_dim=feature_dim,
+        backbone_kwargs=backbone_kwargs,
+    )
