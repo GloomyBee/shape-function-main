@@ -1,0 +1,14 @@
+seed: 42
+num_train: 20000
+num_val: 2000
+k_neighbors: 16
+beta_range: [0.5, 8.0]
+feature_mode: minimal
+patch_types:
+  - uniform
+  - mildly_perturbed
+  - highly_random
+  - clustered
+  - boundary_truncated
+  - anisotropic
+  - sparse_dense_transition

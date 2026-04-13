@@ -103,3 +103,16 @@ def test_resolve_train_config_seed_override_wins(tmp_path: Path) -> None:
     resolved = resolve_train_config(data_path, train_path, seed_override=123)
     assert resolved.seed == 123
     assert resolved.feature_dim == 7
+
+
+def test_resolve_train_config_reads_production_data_config() -> None:
+    repo_root = Path(__file__).resolve().parents[1]
+    resolved = resolve_train_config(
+        repo_root / "configs" / "data_production.yaml",
+        repo_root / "configs" / "train_kernel_operator.yaml",
+    )
+    assert resolved.data["num_train"] == 20000
+    assert resolved.data["num_val"] == 2000
+    assert len(resolved.data["patch_types"]) == 7
+    assert "anisotropic" in resolved.data["patch_types"]
+    assert "sparse_dense_transition" in resolved.data["patch_types"]

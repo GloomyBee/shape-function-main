@@ -40,3 +40,17 @@ def test_structure_head_backward() -> None:
     loss.backward()
     assert logits.grad is not None
     assert torch.isfinite(logits.grad).all()
+
+
+def test_structure_head_default_support_radius_keeps_farthest_neighbor_active() -> None:
+    head = StructurePreservingHead()
+    X = torch.tensor(
+        [[[0.0, 0.0], [0.8, 0.0], [1.0, 0.0]]],
+        dtype=torch.float64,
+    )
+    x_q = torch.tensor([[0.0, 0.0]], dtype=torch.float64)
+    logits = torch.zeros((1, 3), dtype=torch.float64)
+    r_max = torch.linalg.norm(X - x_q[:, None, :], dim=-1).max(dim=-1, keepdim=True).values
+    phi_base, _, _ = head(logits, X, x_q, r_max)
+    farthest_idx = int(torch.argmax(torch.linalg.norm(X - x_q[:, None, :], dim=-1), dim=-1).item())
+    assert phi_base[0, farthest_idx].item() > 0.0

@@ -88,6 +88,8 @@ def _save_checkpoint(
     *,
     run_name: str,
     device: str,
+    best_epoch: int,
+    best_val_total: float,
 ) -> None:
     checkpoint = {
         "model_state_dict": model.state_dict(),
@@ -103,6 +105,8 @@ def _save_checkpoint(
             "feature_mode": resolved.feature_mode,
             "backbone": resolved.backbone_name,
             "k_neighbors": resolved.k_neighbors,
+            "best_epoch": int(best_epoch),
+            "best_val_total": float(best_val_total),
         },
     }
     torch.save(checkpoint, path)
@@ -147,7 +151,15 @@ def run_train_command(args: argparse.Namespace) -> int:
     eval_metrics = evaluate_model(model, val_loader, device=device)
     artifacts = train_result["artifacts"]
     save_json(artifacts.root_dir / "eval_metrics.json", eval_metrics)
-    _save_checkpoint(artifacts.root_dir / "checkpoint.pt", model, resolved, run_name=run_name, device=device)
+    _save_checkpoint(
+        artifacts.root_dir / "checkpoint.pt",
+        model,
+        resolved,
+        run_name=run_name,
+        device=device,
+        best_epoch=int(train_result["metrics"]["best_epoch"]),
+        best_val_total=float(train_result["metrics"]["best_val_total"]),
+    )
     snapshot = build_config_snapshot(resolved, run_name=run_name, device=device, repo_root=repo_root)
     _save_config_snapshot(artifacts.root_dir / "config_snapshot.yaml", snapshot)
     print(f"run_name: {run_name}")

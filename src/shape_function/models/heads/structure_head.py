@@ -9,11 +9,18 @@ from shape_function.models.heads.windows import quartic_spline_window, wendland_
 
 
 class StructurePreservingHead(nn.Module):
-    def __init__(self, window_type: str = "quartic", eps: float = 1.0e-12, eps_reg: float = 1.0e-10):
+    def __init__(
+        self,
+        window_type: str = "quartic",
+        eps: float = 1.0e-12,
+        eps_reg: float = 1.0e-10,
+        support_radius_scale: float = 1.05,
+    ):
         super().__init__()
         self.window_type = window_type
         self.eps = eps
         self.eps_reg = eps_reg
+        self.support_radius_scale = support_radius_scale
 
     def _window(self, s: torch.Tensor) -> torch.Tensor:
         if self.window_type == "quartic":
@@ -32,7 +39,8 @@ class StructurePreservingHead(nn.Module):
     ) -> tuple[torch.Tensor, torch.Tensor, dict[str, torch.Tensor]]:
         raw = F.softplus(logits)
         dist = torch.linalg.norm(X - x_q[:, None, :], dim=-1)
-        window = self._window(dist / r_max.clamp_min(self.eps))
+        support_radius = (self.support_radius_scale * r_max).clamp_min(self.eps)
+        window = self._window(dist / support_radius)
         if mask is not None:
             raw = raw * mask
             window = window * mask
