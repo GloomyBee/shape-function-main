@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import time
 from pathlib import Path
 from typing import Any
 
@@ -9,28 +10,37 @@ from torch.utils.data import DataLoader
 
 from shape_function.train.losses import compute_losses
 from shape_function.train.metrics import compute_batch_metrics
-from shape_function.utils.artifacts import ensure_run_artifacts, save_json, save_npz, save_summary
+from shape_function.utils.artifacts import ensure_run_artifacts, save_npz
 
 
 def _clone_state_dict(model: torch.nn.Module) -> dict[str, torch.Tensor]:
     return {key: value.detach().cpu().clone() for key, value in model.state_dict().items()}
 
 
-def _save_best_checkpoint(
-    path: Path,
-    model: torch.nn.Module,
+def _format_epoch_progress(
     *,
-    best_epoch: int,
-    best_val_total: float,
-) -> None:
-    torch.save(
-        {
-            "model_state_dict": _clone_state_dict(model),
-            "best_epoch": int(best_epoch),
-            "best_val_total": float(best_val_total),
-        },
-        path,
+    epoch: int,
+    epochs: int,
+    elapsed_seconds: float,
+    lr: float,
+    train_metrics: dict[str, float],
+    val_metrics: dict[str, float],
+    is_best: bool,
+) -> str:
+    suffix = " *best" if is_best else ""
+    return (
+        f"[epoch {epoch}/{epochs}] "
+        f"elapsed={elapsed_seconds:.2f}s "
+        f"lr={lr:.6e} "
+        f"train_total={train_metrics['total']:.6e} "
+        f"val_total={val_metrics['total']:.6e} "
+        f"val_rel_l2={val_metrics['relative_l2']:.6e}"
+        f"{suffix}"
     )
+
+
+def _move_batch_tensor(batch: dict[str, torch.Tensor], key: str, device: str) -> torch.Tensor:
+    return batch[key].to(device, non_blocking=(device == "cuda"))
 
 
 def _epoch_pass(
@@ -46,11 +56,11 @@ def _epoch_pass(
     totals: dict[str, float] = {}
     count = 0
     for batch in loader:
-        X = batch["X"].to(device)
-        x_q = batch["x_q"].to(device)
-        beta = batch["beta"].to(device)
-        rho_q = batch["rho_q"].to(device)
-        phi_ref = batch["phi_ref"].to(device)
+        X = _move_batch_tensor(batch, "X", device)
+        x_q = _move_batch_tensor(batch, "x_q", device)
+        beta = _move_batch_tensor(batch, "beta", device)
+        rho_q = _move_batch_tensor(batch, "rho_q", device)
+        phi_ref = _move_batch_tensor(batch, "phi_ref", device)
         outputs = model(X, x_q, beta, rho_q=rho_q if rho_q.shape[-1] > 0 else None)
         losses = compute_losses(outputs, phi_ref, lambda_cons=lambda_cons, lambda_neg=lambda_neg)
         metrics = compute_batch_metrics(outputs, phi_ref)
@@ -90,25 +100,33 @@ def train_model(
     best_val = float("inf")
     best_epoch = 0
     best_state_dict = _clone_state_dict(model)
-    best_checkpoint_path = artifacts.root_dir / "best_model.pt"
     for epoch in range(1, epochs + 1):
-        history["lr"].append(float(optimizer.param_groups[0]["lr"]))
+        epoch_start = time.perf_counter()
+        current_lr = float(optimizer.param_groups[0]["lr"])
+        history["lr"].append(current_lr)
         train_metrics = _epoch_pass(model, train_loader, optimizer, device, lambda_cons, lambda_neg)
         val_metrics = _epoch_pass(model, val_loader, None, device, lambda_cons, lambda_neg)
         history["epoch"].append(float(epoch))
         for prefix, metrics in (("train", train_metrics), ("val", val_metrics)):
             for key, value in metrics.items():
                 history.setdefault(f"{prefix}_{key}", []).append(float(value))
+        is_best = False
         if val_metrics["total"] < best_val:
             best_val = float(val_metrics["total"])
             best_epoch = epoch
             best_state_dict = _clone_state_dict(model)
-            _save_best_checkpoint(
-                best_checkpoint_path,
-                model,
-                best_epoch=best_epoch,
-                best_val_total=best_val,
+            is_best = True
+        print(
+            _format_epoch_progress(
+                epoch=epoch,
+                epochs=epochs,
+                elapsed_seconds=time.perf_counter() - epoch_start,
+                lr=current_lr,
+                train_metrics=train_metrics,
+                val_metrics=val_metrics,
+                is_best=is_best,
             )
+        )
         scheduler.step()
     model.load_state_dict(best_state_dict)
     metrics_payload = {
@@ -118,15 +136,6 @@ def train_model(
         "final_val_total": history["val_total"][-1],
         "final_lr": history["lr"][-1],
     }
-    summary_lines = [
-        f"best_val_total: {best_val:.6e}",
-        f"best_epoch: {best_epoch}",
-        f"final_train_total: {history['train_total'][-1]:.6e}",
-        f"final_val_total: {history['val_total'][-1]:.6e}",
-        f"final_lr: {history['lr'][-1]:.6e}",
-    ]
     curves = {key: np.asarray(values, dtype=np.float64) for key, values in history.items()}
-    save_json(artifacts.root_dir / "metrics.json", metrics_payload)
-    save_summary(artifacts.root_dir / "summary.txt", summary_lines)
     save_npz(artifacts.root_dir / "curves.npz", curves)
     return {"history": history, "metrics": metrics_payload, "artifacts": artifacts}

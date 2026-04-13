@@ -49,11 +49,11 @@ def test_train_model_saves_best_checkpoint_and_restores_best_weights(tmp_path: P
             learning_rate=1.0e-3,
             device="cpu",
         )
-    best_path = result["artifacts"].root_dir / "best_model.pt"
-    assert best_path.is_file()
-    checkpoint = torch.load(best_path, map_location="cpu")
-    assert abs(float(checkpoint["best_val_total"]) - 1.0) < 1.0e-12
-    assert checkpoint["best_epoch"] == 1
+    curves_path = result["artifacts"].root_dir / "curves.npz"
+    assert curves_path.is_file()
+    assert not (result["artifacts"].root_dir / "best_model.pt").exists()
+    assert not (result["artifacts"].root_dir / "metrics.json").exists()
+    assert not (result["artifacts"].root_dir / "summary.txt").exists()
     assert abs(float(model.weight.item()) - 0.1) < 1.0e-12
     assert result["metrics"]["best_epoch"] == 1
 
@@ -91,3 +91,30 @@ def test_train_model_records_learning_rate_curve(tmp_path: Path) -> None:
     assert "lr" in result["history"]
     assert len(result["history"]["lr"]) == 3
     assert result["history"]["lr"][0] > result["history"]["lr"][-1]
+
+
+def test_train_model_prints_epoch_progress(tmp_path: Path, capsys, monkeypatch) -> None:
+    model = _ScalarModel()
+
+    def fake_epoch_pass(*_args, **_kwargs):
+        return {"total": 1.0, "relative_l2": 0.25}
+
+    monkeypatch.setattr(trainer_module, "_epoch_pass", fake_epoch_pass)
+    with warnings.catch_warnings():
+        warnings.filterwarnings("ignore", message="Detected call of `lr_scheduler.step\\(\\)` before `optimizer.step\\(\\)`")
+        trainer_module.train_model(
+            model=model,
+            train_loader=[],
+            val_loader=[],
+            repo_root=tmp_path,
+            run_name="progress_case",
+            epochs=2,
+            learning_rate=1.0e-3,
+            device="cpu",
+        )
+    captured = capsys.readouterr()
+    assert "[epoch 1/2]" in captured.out
+    assert "elapsed=" in captured.out
+    assert "train_total=1.000000e+00" in captured.out
+    assert "val_total=1.000000e+00" in captured.out
+    assert "val_rel_l2=2.500000e-01" in captured.out

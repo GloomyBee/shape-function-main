@@ -102,7 +102,7 @@
 
 - `runs/<run_name>/`
   - 当前 run artifact 目录。
-  - 默认已包含 `metrics.json`, `summary.txt`, `curves.npz`, `checkpoint.pt`, `best_model.pt`, `config_snapshot.yaml`, `eval_metrics.json`。
+  - 默认已包含 `checkpoint.pt`, `curves.npz`, `eval_metrics.json`, `config_snapshot.yaml`, `figures/`。
 
 ---
 

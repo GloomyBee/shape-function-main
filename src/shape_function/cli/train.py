@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import os
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -18,6 +19,10 @@ from shape_function.train.trainer import train_model
 from shape_function.utils.artifacts import save_json
 from shape_function.utils.logging import build_case_name
 from shape_function.utils.seed import seed_everything
+
+
+def _cpu_state_dict(model: torch.nn.Module) -> dict[str, torch.Tensor]:
+    return {key: value.detach().cpu().clone() for key, value in model.state_dict().items()}
 
 
 def add_train_subparser(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
@@ -49,10 +54,28 @@ def _default_run_name(resolved: ResolvedTrainConfig) -> str:
     return f"{base_name}_{timestamp}"
 
 
-def _build_loader(dataset: list[dict[str, Any]], batch_size: int, shuffle: bool) -> DataLoader:
+def _recommended_worker_count(device: str, dataset_size: int) -> int:
+    if device != "cuda" or dataset_size < 1024:
+        return 0
+    cpu_count = os.cpu_count() or 0
+    if cpu_count <= 2:
+        return 0
+    return min(4, max(1, cpu_count // 2))
+
+
+def _build_loader(dataset: list[dict[str, Any]], batch_size: int, shuffle: bool, device: str) -> DataLoader:
     if not dataset:
         raise RuntimeError("dataset construction produced zero valid samples")
-    return DataLoader(PatchDataset(dataset), batch_size=batch_size, shuffle=shuffle)
+    worker_count = _recommended_worker_count(device, len(dataset))
+    loader_kwargs: dict[str, Any] = {
+        "batch_size": batch_size,
+        "shuffle": shuffle,
+        "pin_memory": device == "cuda",
+        "num_workers": worker_count,
+    }
+    if worker_count > 0:
+        loader_kwargs["persistent_workers"] = True
+    return DataLoader(PatchDataset(dataset), **loader_kwargs)
 
 
 def _build_datasets(resolved: ResolvedTrainConfig) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
@@ -92,7 +115,7 @@ def _save_checkpoint(
     best_val_total: float,
 ) -> None:
     checkpoint = {
-        "model_state_dict": model.state_dict(),
+        "model_state_dict": _cpu_state_dict(model),
         "data_config": resolved.data,
         "train_config": {
             "model": resolved.model,
@@ -127,8 +150,8 @@ def run_train_command(args: argparse.Namespace) -> int:
     seed_everything(resolved.seed)
     train_dataset, val_dataset = _build_datasets(resolved)
     batch_size = int(resolved.train["batch_size"])
-    train_loader = _build_loader(train_dataset, batch_size=batch_size, shuffle=True)
-    val_loader = _build_loader(val_dataset, batch_size=batch_size, shuffle=False)
+    train_loader = _build_loader(train_dataset, batch_size=batch_size, shuffle=True, device=device)
+    val_loader = _build_loader(val_dataset, batch_size=batch_size, shuffle=False, device=device)
     model = build_shape_function_model(
         backbone_name=resolved.backbone_name,
         feature_mode=resolved.feature_mode,

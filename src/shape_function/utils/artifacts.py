@@ -29,10 +29,5 @@ def save_json(path: Path, payload: dict[str, Any]) -> None:
         json.dump(payload, handle, indent=2, ensure_ascii=False)
 
 
-def save_summary(path: Path, lines: list[str]) -> None:
-    with path.open("w", encoding="utf-8") as handle:
-        handle.write("\n".join(lines) + "\n")
-
-
 def save_npz(path: Path, arrays: dict[str, np.ndarray]) -> None:
     np.savez(path, **arrays)

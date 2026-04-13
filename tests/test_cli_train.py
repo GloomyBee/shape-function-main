@@ -6,6 +6,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+import torch
+
 
 def _write_small_configs(tmp_path: Path) -> tuple[Path, Path]:
     data_path = tmp_path / "data.yaml"
@@ -88,15 +90,26 @@ def test_python_module_train_cli_creates_expected_artifacts(tmp_path: Path) -> N
         env=_command_env(repo_root),
     )
     assert completed.returncode == 0, completed.stderr
-    assert (run_dir / "metrics.json").is_file()
-    assert (run_dir / "summary.txt").is_file()
     assert (run_dir / "curves.npz").is_file()
     assert (run_dir / "checkpoint.pt").is_file()
-    assert (run_dir / "best_model.pt").is_file()
     assert (run_dir / "config_snapshot.yaml").is_file()
     assert (run_dir / "eval_metrics.json").is_file()
+    assert (run_dir / "figures").is_dir()
+    assert not (run_dir / "metrics.json").exists()
+    assert not (run_dir / "summary.txt").exists()
+    assert not (run_dir / "best_model.pt").exists()
+    checkpoint = torch.load(run_dir / "checkpoint.pt", map_location="cpu")
+    metadata = checkpoint["metadata"]
+    assert metadata["run_name"] == run_name
+    assert metadata["device"] == "cpu"
+    assert metadata["feature_mode"] == "minimal"
+    assert metadata["backbone"] == "kernel_operator"
+    assert metadata["k_neighbors"] == 16
+    assert metadata["best_epoch"] == 1
     assert f"run_name: {run_name}" in completed.stdout
     assert "device: cpu" in completed.stdout
+    assert "[epoch 1/1]" in completed.stdout
+    assert "elapsed=" in completed.stdout
     assert "training complete" in completed.stdout.lower()
     shutil.rmtree(run_dir)
 
@@ -132,7 +145,7 @@ def test_console_script_train_cli_runs_end_to_end(tmp_path: Path) -> None:
     )
     assert completed.returncode == 0, completed.stderr
     assert (run_dir / "checkpoint.pt").is_file()
-    assert (run_dir / "best_model.pt").is_file()
+    assert not (run_dir / "best_model.pt").exists()
     shutil.rmtree(run_dir)
 
 
