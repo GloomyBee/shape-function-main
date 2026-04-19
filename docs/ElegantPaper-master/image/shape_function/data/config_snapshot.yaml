@@ -1,0 +1,41 @@
+data:
+  seed: 42
+  num_train: 20000
+  num_val: 2000
+  k_neighbors: 16
+  beta_range:
+  - 0.5
+  - 8.0
+  feature_mode: minimal
+  patch_types:
+  - uniform
+  - mildly_perturbed
+  - highly_random
+  - clustered
+  - boundary_truncated
+  - anisotropic
+  - sparse_dense_transition
+train:
+  model:
+    backbone: kernel_operator
+    hidden_dim: 64
+    num_layers: 2
+    feature_mode: minimal
+  train:
+    batch_size: 32
+    epochs: 10
+    learning_rate: 0.001
+    lambda_cons: 0.0001
+    lambda_neg: 1.0e-05
+resolved:
+  seed: 42
+  feature_mode: minimal
+  feature_dim: 4
+  backbone: kernel_operator
+  k_neighbors: 16
+  prior_type: gaussian
+  train_seed: 42
+  val_seed: 43
+  device: cpu
+  run_name: prod_kernel_operator_20260413
+  repo_root: C:\Users\CodexSandboxOffline\.codex\.sandbox\cwd\d2f28f34e96fcac3

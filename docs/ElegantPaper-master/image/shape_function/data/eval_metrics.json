@@ -1,0 +1,10 @@
+{
+  "relative_l2": 0.1201075845316485,
+  "global_linf": 0.19686436242884864,
+  "mean_pou_residual": 2.2589117505246346e-10,
+  "mean_linear_residual": 4.965969969255455e-10,
+  "negative_fraction": 0.04639803364527629,
+  "max_negative_magnitude": 0.048395970513023606,
+  "mean_cond_M": 646.2508005231447,
+  "worst_cond_M": 6374.104333183738
+}

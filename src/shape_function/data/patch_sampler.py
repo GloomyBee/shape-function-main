@@ -124,3 +124,18 @@ def sample_patches(
         if patch["validation"]["is_valid"]:
             patches.append(patch)
     return patches
+
+if __name__ == "__main__":
+    rng = np.random.default_rng(42)
+
+    patch = sample_patch(rng, "boundary_truncated", k_neighbors=16)
+
+    print("=" * 80)
+    print("patch_type:", patch["patch_type"])
+    print("x_q:", patch["x_q"])
+    print("X shape:", patch["X"].shape)
+    print("X:\n", patch["X"])
+    print("beta:", patch["beta"])
+    print("r_max:", patch["r_max"])
+    print("distances:", patch["meta"]["distances"])
+    print("validation:", patch["validation"])
