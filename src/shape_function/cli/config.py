@@ -20,6 +20,9 @@ class ResolvedTrainConfig:
     data: dict[str, Any]
     model: dict[str, Any]
     train: dict[str, Any]
+    head: dict[str, Any]
+    loss: dict[str, Any]
+    eval: dict[str, Any]
     seed: int
     feature_mode: str
     feature_dim: int
@@ -62,12 +65,11 @@ def resolve_train_config(
         raise ConfigError("train config field 'train' must be a mapping")
     model_payload = dict(train_payload["model"])
     train_section = dict(train_payload["train"])
+    head_section = dict(train_payload.get("head", {}))
+    loss_section = dict(train_payload.get("loss", {}))
+    eval_section = dict(train_payload.get("eval", {}))
     _require_keys(model_payload, ("backbone", "hidden_dim"), f"model section in {train_config_path}")
-    _require_keys(
-        train_section,
-        ("batch_size", "epochs", "learning_rate", "lambda_cons", "lambda_neg"),
-        f"train section in {train_config_path}",
-    )
+    _require_keys(train_section, ("batch_size", "epochs", "learning_rate"), f"train section in {train_config_path}")
     feature_mode = str(data_payload["feature_mode"])
     if "feature_mode" in model_payload and str(model_payload["feature_mode"]) != feature_mode:
         raise ConfigError(
@@ -83,6 +85,25 @@ def resolve_train_config(
     patch_types = data_payload["patch_types"]
     if not isinstance(patch_types, list) or not patch_types:
         raise ConfigError("data config field 'patch_types' must be a non-empty list")
+    loss_mode = str(loss_section.get("mode", "unsupervised_v1"))
+    head_section.setdefault("basis_order", 1)
+    head_section.setdefault("fallback_mode", "hard")
+    train_section.setdefault("prior_type", "gaussian")
+    eval_section.setdefault("compute_teacher_metrics", False)
+    if head_section["basis_order"] not in (1, 2):
+        raise ConfigError("basis_order must be 1 or 2")
+    if head_section["fallback_mode"] != "hard":
+        raise ConfigError("fallback_mode must be 'hard'")
+    if train_section["prior_type"] != "gaussian":
+        raise ConfigError("prior_type must be 'gaussian'")
+    if head_section["basis_order"] == 2 and "kappa_max" not in head_section:
+        raise ConfigError("basis_order=2 requires head.kappa_max")
+    if loss_mode == "unsupervised_v1":
+        _require_keys(loss_section, ("lambda_base_lin", "lambda_ent", "lambda_neg"), f"loss section in {train_config_path}")
+    elif loss_mode == "legacy_teacher_baseline":
+        _require_keys(loss_section, ("lambda_data", "lambda_cons", "lambda_neg"), f"loss section in {train_config_path}")
+    else:
+        raise ConfigError(f"Unsupported loss.mode: {loss_mode}")
     feature_dim = feature_dim_for_mode(feature_mode)
     seed = int(seed_override if seed_override is not None else data_payload["seed"])
     return ResolvedTrainConfig(
@@ -91,6 +112,9 @@ def resolve_train_config(
         data=dict(data_payload),
         model=model_payload,
         train=train_section,
+        head=head_section,
+        loss=loss_section,
+        eval=eval_section,
         seed=seed,
         feature_mode=feature_mode,
         feature_dim=feature_dim,
@@ -111,6 +135,9 @@ def build_config_snapshot(
         "train": {
             "model": resolved.model,
             "train": resolved.train,
+            "head": resolved.head,
+            "loss": resolved.loss,
+            "eval": resolved.eval,
         },
         "resolved": {
             "seed": resolved.seed,
@@ -118,11 +145,13 @@ def build_config_snapshot(
             "feature_dim": resolved.feature_dim,
             "backbone": resolved.backbone_name,
             "k_neighbors": resolved.k_neighbors,
-            "prior_type": "gaussian",
+            "prior_type": resolved.train["prior_type"],
             "train_seed": resolved.seed,
             "val_seed": resolved.seed + 1,
             "device": device,
             "run_name": run_name,
             "repo_root": str(repo_root),
+            "loss_mode": resolved.loss["mode"],
+            "basis_order": resolved.head["basis_order"],
         },
     }

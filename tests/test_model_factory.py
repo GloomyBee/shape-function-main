@@ -19,10 +19,12 @@ def test_build_shape_function_model_propagates_kernel_operator_params() -> None:
         hidden_dim=24,
         num_layers=3,
         k_neighbors=16,
+        head_kwargs={"basis_order": 2, "kappa_max": 1.0e8},
     )
     assert model.backbone.hidden_dim == 24
     assert model.backbone.num_layers == 3
     assert model.backbone.lift[0].in_features == 7
+    assert model.head.basis_order == 2
 
 
 def test_build_shape_function_model_propagates_mlp_params() -> None:

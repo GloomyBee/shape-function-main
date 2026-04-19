@@ -1,4 +1,4 @@
-model:
+﻿model:
   backbone: kernel_operator
   hidden_dim: 64
   num_layers: 2
@@ -9,13 +9,12 @@ train:
   learning_rate: 0.001
   prior_type: gaussian
 head:
-  basis_order: 2
-  kappa_max: 100000000.0
+  basis_order: 1
   fallback_mode: hard
 loss:
-  mode: unsupervised_v1
-  lambda_base_lin: 1.0
-  lambda_ent: 0.01
+  mode: legacy_teacher_baseline
+  lambda_data: 1.0
+  lambda_cons: 0.0001
   lambda_neg: 0.00001
 eval:
-  compute_teacher_metrics: false
+  compute_teacher_metrics: true

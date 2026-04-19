@@ -7,7 +7,13 @@ from torch.utils.data import DataLoader
 from shape_function.train.metrics import compute_batch_metrics
 
 
-def evaluate_model(model, loader: DataLoader, device: str = "cpu") -> dict[str, Any]:
+def evaluate_model(
+    model,
+    loader: DataLoader,
+    device: str = "cpu",
+    *,
+    compute_teacher_metrics: bool = False,
+) -> dict[str, Any]:
     model.eval()
     summary: dict[str, float] = {}
     count = 0
@@ -18,7 +24,8 @@ def evaluate_model(model, loader: DataLoader, device: str = "cpu") -> dict[str, 
             batch["beta"].to(device),
             rho_q=batch["rho_q"].to(device) if batch["rho_q"].shape[-1] > 0 else None,
         )
-        metrics = compute_batch_metrics(outputs, batch["phi_ref"].to(device))
+        phi_ref = batch["phi_ref"].to(device) if "phi_ref" in batch else None
+        metrics = compute_batch_metrics(outputs, phi_ref, compute_teacher_metrics=compute_teacher_metrics and phi_ref is not None)
         for key, value in metrics.items():
             summary[key] = summary.get(key, 0.0) + value
         count += 1

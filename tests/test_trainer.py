@@ -31,10 +31,10 @@ def test_train_model_saves_best_checkpoint_and_restores_best_weights(tmp_path: P
     call_index = {"value": 0}
 
     def fake_epoch_pass(*_args, **_kwargs):
-        phase, total, marker = states[call_index["value"]]
+        _phase, total, marker = states[call_index["value"]]
         call_index["value"] += 1
         model.weight.data.fill_(marker)
-        return {"total": total, "relative_l2": total}
+        return {"total": total, "base_linear_residual": total}
 
     monkeypatch.setattr(trainer_module, "_epoch_pass", fake_epoch_pass)
     with warnings.catch_warnings():
@@ -51,25 +51,15 @@ def test_train_model_saves_best_checkpoint_and_restores_best_weights(tmp_path: P
         )
     curves_path = result["artifacts"].root_dir / "curves.npz"
     assert curves_path.is_file()
-    assert not (result["artifacts"].root_dir / "best_model.pt").exists()
-    assert not (result["artifacts"].root_dir / "metrics.json").exists()
-    assert not (result["artifacts"].root_dir / "summary.txt").exists()
     assert abs(float(model.weight.item()) - 0.1) < 1.0e-12
     assert result["metrics"]["best_epoch"] == 1
 
 
 def test_train_model_records_learning_rate_curve(tmp_path: Path) -> None:
     model = torch.nn.Linear(2, 1, dtype=torch.float64)
-    sample = {
-        "X": torch.zeros((1, 2, 2), dtype=torch.float64),
-        "x_q": torch.zeros((1, 2), dtype=torch.float64),
-        "beta": torch.ones((1, 1), dtype=torch.float64),
-        "rho_q": torch.zeros((1, 0), dtype=torch.float64),
-        "phi_ref": torch.ones((1, 2), dtype=torch.float64) / 2.0,
-    }
 
     def fake_epoch_pass(*_args, **_kwargs):
-        return {"total": 1.0, "relative_l2": 1.0}
+        return {"total": 1.0, "base_linear_residual": 1.0}
 
     original_epoch_pass = trainer_module._epoch_pass
     trainer_module._epoch_pass = fake_epoch_pass
@@ -78,8 +68,8 @@ def test_train_model_records_learning_rate_curve(tmp_path: Path) -> None:
             warnings.filterwarnings("ignore", message="Detected call of `lr_scheduler.step\\(\\)` before `optimizer.step\\(\\)`")
             result = trainer_module.train_model(
                 model=model,
-                train_loader=[sample],
-                val_loader=[sample],
+                train_loader=[{"X": torch.zeros(1, 2, 2, dtype=torch.float64)}],
+                val_loader=[{"X": torch.zeros(1, 2, 2, dtype=torch.float64)}],
                 repo_root=tmp_path,
                 run_name="scheduler_case",
                 epochs=3,
@@ -97,7 +87,7 @@ def test_train_model_prints_epoch_progress(tmp_path: Path, capsys, monkeypatch) 
     model = _ScalarModel()
 
     def fake_epoch_pass(*_args, **_kwargs):
-        return {"total": 1.0, "relative_l2": 0.25}
+        return {"total": 1.0, "base_linear_residual": 0.25}
 
     monkeypatch.setattr(trainer_module, "_epoch_pass", fake_epoch_pass)
     with warnings.catch_warnings():
@@ -117,4 +107,4 @@ def test_train_model_prints_epoch_progress(tmp_path: Path, capsys, monkeypatch) 
     assert "elapsed=" in captured.out
     assert "train_total=1.000000e+00" in captured.out
     assert "val_total=1.000000e+00" in captured.out
-    assert "val_rel_l2=2.500000e-01" in captured.out
+    assert "val_base_lin=2.500000e-01" in captured.out

@@ -324,3 +324,40 @@ OOD 数据集在论文里很重要，但当前是否立刻实现仍有策略问�
 - 论文叙事和工程现状不会混在一起；
 - 文档不会随着实现细节波动而失去稳定性；
 - 任何时候都能清楚地区分“已稳定的方法定义”和“仍在推进的工程任务”。
+
+---
+
+## 7. 子线 A v3 工程决策记录
+
+### 7.1 已落地的工程变化
+
+- `dataset_builder.build_dataset(...)` 默认 `supervision_mode="none"`，不再默认调用 max-ent solver。
+- `supervision_mode="teacher"` 保留为 legacy baseline 分支，供 A3 Baseline 使用。
+- `StructurePreservingHead` 支持 `basis_order=1|2`，二阶分支使用 query-centered、`r_max` 归一化基底。
+- `apply_reproducing_correction(...)` 支持 hard fallback，二阶 moment 条件数超过 `kappa_max` 时回退一阶输出。
+- `compute_losses(...)` 支持 `unsupervised_v1` 与 `legacy_teacher_baseline` 两种模式。
+- `compute_batch_metrics(...)` 支持无 teacher 结构指标；teacher 指标仅在显式要求且 batch 含 `phi_ref` 时计算。
+- `configs/train_kernel_operator.yaml` 与 `configs/train_mlp.yaml` 默认切到 `unsupervised_v1`。
+- `configs/train_kernel_operator_legacy_teacher.yaml` 作为 legacy teacher baseline 示例配置保留。
+- `src/shape_function/eval/scan_cond_m2.py` 提供 A2 条件数扫描脚手架，可输出总体与按 patch type 分层统计。
+
+### 7.2 为什么保留 legacy baseline
+
+legacy baseline 的作用不是继续定义主方法，而是保留 A3 对照锚点。没有它时，后续若 Target 表现变化，无法区分变化来自：
+
+1. 去 teacher 损失范式；
+2. 二阶 B4 结构升级；
+3. 数据或优化噪声。
+
+因此 legacy baseline 是实验隔离工具，不是默认训练范式。
+
+### 7.3 当前验收状态
+
+本阶段的工程验收重点是：
+
+- A1：二阶 B4 在健康 patch 上六条 reproducing residual 达到数值零。
+- A2：条件数扫描脚手架能输出 `cond_M2` 分布和 fallback 估计。
+- CLI：默认无 teacher 训练可启动并生成 `curves.npz` 与 `eval_metrics.json`。
+- Legacy：teacher baseline 配置仍可跑通最小训练。
+
+长程 A3 训练不在本轮交付范围内。下一步应先运行 A2 扫描，再决定 `kappa_max` 的经验值，然后进入三组训练对照。

@@ -18,7 +18,10 @@ def build_dataset(
     prior_type: str = "gaussian",
     patch_types: Sequence[str] | None = None,
     beta_range: tuple[float, float] = (0.5, 8.0),
+    supervision_mode: str = "none",
 ) -> list[dict[str, Any]]:
+    if supervision_mode not in {"none", "teacher"}:
+        raise ValueError(f"Unsupported supervision_mode: {supervision_mode}")
     resolved_patch_types = tuple(patch_types) if patch_types is not None else PATCH_TYPES
     patches = sample_patches(
         num_patches,
@@ -29,12 +32,13 @@ def build_dataset(
     )
     dataset: list[dict[str, Any]] = []
     for patch in patches:
-        teacher = solve_maxent_patch(patch["x_q"], patch["X"], patch["beta"], prior_type=prior_type)
-        if not teacher["success"]:
-            continue
         item = dict(patch)
-        item["phi_ref"] = teacher["phi_ref"]
-        item["teacher"] = teacher
+        if supervision_mode == "teacher":
+            teacher = solve_maxent_patch(patch["x_q"], patch["X"], patch["beta"], prior_type=prior_type)
+            if not teacher["success"]:
+                continue
+            item["phi_ref"] = teacher["phi_ref"]
+            item["teacher"] = teacher
         features = build_patch_features(item, feature_mode=feature_mode, k_max=k_neighbors)
         item["rho_q"] = features["rho_q"]
         item["node_features"] = features["node_features"]

@@ -79,12 +79,14 @@ def _build_loader(dataset: list[dict[str, Any]], batch_size: int, shuffle: bool,
 
 
 def _build_datasets(resolved: ResolvedTrainConfig) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    supervision_mode = "teacher" if resolved.loss["mode"] == "legacy_teacher_baseline" else "none"
     common_kwargs = {
         "feature_mode": resolved.feature_mode,
         "k_neighbors": resolved.k_neighbors,
-        "prior_type": "gaussian",
+        "prior_type": resolved.train["prior_type"],
         "patch_types": tuple(str(item) for item in resolved.data["patch_types"]),
         "beta_range": tuple(float(value) for value in resolved.data["beta_range"]),
+        "supervision_mode": supervision_mode,
     }
     train_dataset = build_dataset(
         num_patches=int(resolved.data["num_train"]),
@@ -120,6 +122,9 @@ def _save_checkpoint(
         "train_config": {
             "model": resolved.model,
             "train": resolved.train,
+            "head": resolved.head,
+            "loss": resolved.loss,
+            "eval": resolved.eval,
         },
         "metadata": {
             "run_name": run_name,
@@ -130,6 +135,8 @@ def _save_checkpoint(
             "k_neighbors": resolved.k_neighbors,
             "best_epoch": int(best_epoch),
             "best_val_total": float(best_val_total),
+            "basis_order": int(resolved.head["basis_order"]),
+            "loss_mode": str(resolved.loss["mode"]),
         },
     }
     torch.save(checkpoint, path)
@@ -158,6 +165,7 @@ def run_train_command(args: argparse.Namespace) -> int:
         hidden_dim=int(resolved.model["hidden_dim"]),
         num_layers=int(resolved.model["num_layers"]) if "num_layers" in resolved.model else None,
         k_neighbors=resolved.k_neighbors,
+        head_kwargs=dict(resolved.head),
     )
     train_result = train_model(
         model=model,
@@ -167,11 +175,17 @@ def run_train_command(args: argparse.Namespace) -> int:
         run_name=run_name,
         epochs=int(resolved.train["epochs"]),
         learning_rate=float(resolved.train["learning_rate"]),
-        lambda_cons=float(resolved.train["lambda_cons"]),
-        lambda_neg=float(resolved.train["lambda_neg"]),
         device=device,
+        loss_mode=str(resolved.loss["mode"]),
+        loss_weights={key: float(value) for key, value in resolved.loss.items() if key != "mode"},
+        compute_teacher_metrics=bool(resolved.eval["compute_teacher_metrics"]),
     )
-    eval_metrics = evaluate_model(model, val_loader, device=device)
+    eval_metrics = evaluate_model(
+        model,
+        val_loader,
+        device=device,
+        compute_teacher_metrics=bool(resolved.eval["compute_teacher_metrics"]),
+    )
     artifacts = train_result["artifacts"]
     save_json(artifacts.root_dir / "eval_metrics.json", eval_metrics)
     _save_checkpoint(
@@ -189,9 +203,13 @@ def run_train_command(args: argparse.Namespace) -> int:
     print(f"device: {device}")
     print(f"train_samples: {len(train_dataset)}")
     print(f"val_samples: {len(val_dataset)}")
+    print(f"loss_mode: {resolved.loss['mode']}")
     print("training complete")
     print(f"best_val_total: {train_result['metrics']['best_val_total']:.6e}")
     print(f"final_val_total: {train_result['metrics']['final_val_total']:.6e}")
-    print(f"eval_relative_l2: {eval_metrics['relative_l2']:.6e}")
+    if "relative_l2" in eval_metrics:
+        print(f"eval_relative_l2: {eval_metrics['relative_l2']:.6e}")
+    else:
+        print(f"eval_base_linear_residual: {eval_metrics['base_linear_residual']:.6e}")
     print(f"artifacts_dir: {artifacts.root_dir}")
     return 0

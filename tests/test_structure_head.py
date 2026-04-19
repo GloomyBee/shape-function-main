@@ -14,18 +14,36 @@ def _sample_inputs() -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Te
     return logits, X, x_q, r_max
 
 
-def test_structure_head_preserves_constraints() -> None:
+def test_structure_head_preserves_constraints_order1() -> None:
     logits, X, x_q, r_max = _sample_inputs()
-    head = StructurePreservingHead()
+    head = StructurePreservingHead(basis_order=1)
     _, phi_corr, aux = head(logits, X, x_q, r_max)
     assert phi_corr.shape == (4, 16)
     assert torch.max(torch.abs(aux["sum_phi"] - 1.0)).item() < 1.0e-6
     assert torch.max(aux["linear_residual"]).item() < 1.0e-6
 
 
+def test_structure_head_supports_order2_aux_fields() -> None:
+    logits, X, x_q, r_max = _sample_inputs()
+    head = StructurePreservingHead(basis_order=2, kappa_max=1.0e8, fallback_mode="hard")
+    _, phi_corr, aux = head(logits, X, x_q, r_max)
+    assert phi_corr.shape == (4, 16)
+    for key in (
+        "cond_M2",
+        "fallback_rate_batch",
+        "reproducing_residual_const",
+        "reproducing_residual_linear",
+        "reproducing_residual_quadratic",
+        "base_linear_residual",
+        "negative_fraction_2nd",
+        "max_negative_magnitude_2nd",
+    ):
+        assert key in aux
+
+
 def test_structure_head_translation_invariance() -> None:
     logits, X, x_q, r_max = _sample_inputs()
-    head = StructurePreservingHead()
+    head = StructurePreservingHead(basis_order=2, kappa_max=1.0e8, fallback_mode="hard")
     _, phi_a, _ = head(logits, X, x_q, r_max)
     shift = torch.tensor([3.0, -2.0], dtype=torch.float64)
     _, phi_b, _ = head(logits, X + shift, x_q + shift, r_max)
@@ -34,7 +52,7 @@ def test_structure_head_translation_invariance() -> None:
 
 def test_structure_head_backward() -> None:
     logits, X, x_q, r_max = _sample_inputs()
-    head = StructurePreservingHead()
+    head = StructurePreservingHead(basis_order=2, kappa_max=1.0e8, fallback_mode="hard")
     _, phi_corr, _ = head(logits, X, x_q, r_max)
     loss = phi_corr.square().mean()
     loss.backward()

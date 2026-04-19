@@ -760,3 +760,124 @@ $$
 - 面向后续大变形 meshfree warm start 的局部 shape function 生成器。
 
 这也是它与普通 operator learning 模型最根本的区别。
+
+---
+
+## 9. 子线 A v3 更新：二阶 B4 与无 teacher 主训练范式
+
+本阶段的方法分工从“teacher-supervised surrogate”推进到“结构约束优先的无 teacher 训练原型”。默认训练链不再把 max-ent `phi_ref` 作为监督标签，而是让 backbone 在 B4 之前通过 base-level 一阶一致性信号学习几何平衡；B4 则从主要一致性学习目标转为 closed-form safety net。
+
+新的默认数据流为：
+
+```text
+patch -> features -> backbone logits -> B1/B2/B3 -> phi_base
+      -> unsupervised losses: base linear + entropy-to-prior + negative penalty
+      -> B4(order=1 or order=2) -> phi_final
+```
+
+### 9.1 框架重分工
+
+backbone 仍负责局部几何表达，但现在训练目标会直接推动它在 `phi_base` 层满足一阶几何平衡：
+
+$$
+\mathcal{L}_{\mathrm{base-lin}}
+=\left\|\sum_i \phi_i^{\mathrm{base}}(\mathbf{X}_i-\mathbf{x}_q)\right\|_2^2.
+$$
+
+B4 不再被叙述为“训练中唯一的一致性来源”。更准确的说法是：若 backbone 学得好，B4 接近 identity；若 base 权重仍有残差，B4 用闭式 moment correction 把残差清零；若二阶 moment 病态，则 hard fallback 回一阶 B4。
+
+### 9.2 二阶 B4
+
+二阶 B4 固定使用 query-centered 且 `r_max` 归一化的二维多项式基底：
+
+$$
+\tilde{x}_{i,\alpha}=\frac{X_{i,\alpha}-x_{q,\alpha}}{r_{\max}},
+\qquad
+\tilde{\mathbf{p}}_2(\mathbf{X}_i)=
+[1,\tilde{x}_i,\tilde{y}_i,\tilde{x}_i^2,\tilde{x}_i\tilde{y}_i,\tilde{y}_i^2]^\top.
+$$
+
+moment matrix 与闭式修正为：
+
+$$
+\mathbf{M}_2=\sum_j \phi_j^{\mathrm{base}}
+\tilde{\mathbf{p}}_2(\mathbf{X}_j)
+\tilde{\mathbf{p}}_2(\mathbf{X}_j)^\top,
+\qquad
+\mathbf{c}_2=\mathbf{M}_2^{-1}\mathbf{e}_1,
+$$
+
+$$
+\phi_i^{(2)}=\phi_i^{\mathrm{base}}
+\tilde{\mathbf{p}}_2(\mathbf{X}_i)^\top\mathbf{c}_2.
+$$
+
+未触发 fallback 时，该构造直接保证
+
+$$
+\sum_i \phi_i^{(2)}q(\mathbf{X}_i)=q(\mathbf{x}_q),
+\quad q\in\{1,x,y,x^2,xy,y^2\}.
+$$
+
+当前实现只支持 hard fallback：
+
+$$
+\phi_i^{\mathrm{final}}=
+\begin{cases}
+\phi_i^{(2)}, & \kappa(\mathbf{M}_2)\le \kappa_{\max},\\
+\phi_i^{(1)}, & \kappa(\mathbf{M}_2)> \kappa_{\max}.
+\end{cases}
+$$
+
+### 9.3 无 teacher 默认损失
+
+默认损失为：
+
+$$
+\mathcal{L}=\lambda_{\mathrm{lin}}\mathcal{L}_{\mathrm{base-lin}}
++\lambda_{\mathrm{ent}}\mathcal{L}_{\mathrm{ent}}
++\lambda_{\mathrm{neg}}\mathcal{L}_{\mathrm{neg}}.
+$$
+
+其中 entropy-to-prior 只作为弱正则：
+
+$$
+\mathcal{L}_{\mathrm{ent}}
+=\sum_i\phi_i^{\mathrm{base}}
+\log\frac{\phi_i^{\mathrm{base}}+\varepsilon}{w_i+\varepsilon},
+$$
+
+$w_i$ 使用与原 max-ent teacher 同源的 Gaussian prior，但不再求解 max-ent dual problem。负值惩罚仍作用在最终输出 `phi_final` 上：
+
+$$
+\mathcal{L}_{\mathrm{neg}}=\frac{1}{k}\sum_i\max(0,-\phi_i^{\mathrm{final}}).
+$$
+
+### 9.4 legacy teacher baseline
+
+max-ent teacher 没有从仓库中删除。它被保留为 `loss.mode = legacy_teacher_baseline`，用于 A3 的 Baseline 对照。该分支继续使用
+
+$$
+\mathcal{L}_{\mathrm{data}}+
+\lambda_{\mathrm{cons}}\mathcal{L}_{\mathrm{cons}}+
+\lambda_{\mathrm{neg}}\mathcal{L}_{\mathrm{neg}}.
+$$
+
+这样做的目的不是让 teacher 继续支配主方法，而是保留一个可复现实验锚点，用于隔离“去 teacher 损失变化”和“B4 升阶”这两个因素。
+
+### 9.5 塌缩风险声明
+
+若只保留 entropy-to-prior 项，最优解会退化到归一化 prior：
+
+$$
+\phi_i^{\mathrm{base}}=\frac{w_i}{\sum_j w_j}.
+$$
+
+这会把方法退回到“以固定 prior 为基的经典 RK/MLS correction”，神经网络本身不再承担非平凡学习任务。因此当前方案必须以 `base_linear_residual` 的下降作为关键训练诊断。若该量长期停在归一化 prior 的残差水平附近，说明无 teacher 范式没有真正启动。
+
+### 9.6 当前未决项
+
+- 二阶 moment 条件数是否在全部 patch family 上可控，需要 A2 扫描确认。
+- `loss_base_quad` 本阶段不实现，只记录二阶 reproducing residual 作为监控量。
+- 无 teacher 范式是否稳定，需要 A3 中的 Abl-1 组验证。
+- 二阶 B4 的收益只应通过 Abl-1 与 Target 的差异判断，不能与 legacy teacher Baseline 混在一起解释。

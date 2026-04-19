@@ -28,13 +28,15 @@ def _format_epoch_progress(
     is_best: bool,
 ) -> str:
     suffix = " *best" if is_best else ""
+    tail_metric = "val_rel_l2" if "relative_l2" in val_metrics else "val_base_lin"
+    tail_value = val_metrics.get("relative_l2", val_metrics.get("base_linear_residual", float("nan")))
     return (
         f"[epoch {epoch}/{epochs}] "
         f"elapsed={elapsed_seconds:.2f}s "
         f"lr={lr:.6e} "
         f"train_total={train_metrics['total']:.6e} "
         f"val_total={val_metrics['total']:.6e} "
-        f"val_rel_l2={val_metrics['relative_l2']:.6e}"
+        f"{tail_metric}={tail_value:.6e}"
         f"{suffix}"
     )
 
@@ -48,8 +50,9 @@ def _epoch_pass(
     loader: DataLoader,
     optimizer: torch.optim.Optimizer | None,
     device: str,
-    lambda_cons: float,
-    lambda_neg: float,
+    loss_mode: str,
+    loss_weights: dict[str, float],
+    compute_teacher_metrics: bool,
 ) -> dict[str, float]:
     train_mode = optimizer is not None
     model.train(mode=train_mode)
@@ -60,10 +63,18 @@ def _epoch_pass(
         x_q = _move_batch_tensor(batch, "x_q", device)
         beta = _move_batch_tensor(batch, "beta", device)
         rho_q = _move_batch_tensor(batch, "rho_q", device)
-        phi_ref = _move_batch_tensor(batch, "phi_ref", device)
+        phi_ref = _move_batch_tensor(batch, "phi_ref", device) if "phi_ref" in batch else None
         outputs = model(X, x_q, beta, rho_q=rho_q if rho_q.shape[-1] > 0 else None)
-        losses = compute_losses(outputs, phi_ref, lambda_cons=lambda_cons, lambda_neg=lambda_neg)
-        metrics = compute_batch_metrics(outputs, phi_ref)
+        losses = compute_losses(
+            outputs,
+            phi_ref,
+            X=X,
+            x_q=x_q,
+            beta=beta,
+            loss_mode=loss_mode,
+            **loss_weights,
+        )
+        metrics = compute_batch_metrics(outputs, phi_ref, compute_teacher_metrics=compute_teacher_metrics and phi_ref is not None)
         if train_mode:
             optimizer.zero_grad()
             losses["total"].backward()
@@ -84,9 +95,10 @@ def train_model(
     run_name: str,
     epochs: int = 10,
     learning_rate: float = 1.0e-3,
-    lambda_cons: float = 1.0e-4,
-    lambda_neg: float = 1.0e-5,
     device: str = "cpu",
+    loss_mode: str = "unsupervised_v1",
+    loss_weights: dict[str, float] | None = None,
+    compute_teacher_metrics: bool = False,
 ) -> dict[str, Any]:
     model.to(device)
     optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
@@ -100,12 +112,13 @@ def train_model(
     best_val = float("inf")
     best_epoch = 0
     best_state_dict = _clone_state_dict(model)
+    resolved_loss_weights = dict(loss_weights or {})
     for epoch in range(1, epochs + 1):
         epoch_start = time.perf_counter()
         current_lr = float(optimizer.param_groups[0]["lr"])
         history["lr"].append(current_lr)
-        train_metrics = _epoch_pass(model, train_loader, optimizer, device, lambda_cons, lambda_neg)
-        val_metrics = _epoch_pass(model, val_loader, None, device, lambda_cons, lambda_neg)
+        train_metrics = _epoch_pass(model, train_loader, optimizer, device, loss_mode, resolved_loss_weights, compute_teacher_metrics)
+        val_metrics = _epoch_pass(model, val_loader, None, device, loss_mode, resolved_loss_weights, compute_teacher_metrics)
         history["epoch"].append(float(epoch))
         for prefix, metrics in (("train", train_metrics), ("val", val_metrics)):
             for key, value in metrics.items():

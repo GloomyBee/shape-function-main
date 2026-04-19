@@ -35,6 +35,7 @@ class ShapeFunctionModel(nn.Module):
         backbone_name: str = "kernel_operator",
         feature_dim: int = 4,
         backbone_kwargs: dict[str, Any] | None = None,
+        head_kwargs: dict[str, Any] | None = None,
     ):
         super().__init__()
         resolved_backbone_kwargs = dict(backbone_kwargs or {})
@@ -44,7 +45,7 @@ class ShapeFunctionModel(nn.Module):
             self.backbone = MLPBaselineBackbone(input_dim=feature_dim, **resolved_backbone_kwargs)
         else:
             raise ValueError(f"Unsupported backbone_name: {backbone_name}")
-        self.head = StructurePreservingHead()
+        self.head = StructurePreservingHead(**dict(head_kwargs or {}))
         self.double()
 
     def forward(
@@ -75,6 +76,7 @@ def build_shape_function_model(
     hidden_dim: int | None = None,
     num_layers: int | None = None,
     k_neighbors: int = 16,
+    head_kwargs: dict[str, Any] | None = None,
 ) -> ShapeFunctionModel:
     feature_dim = feature_dim_for_mode(feature_mode)
     backbone_kwargs: dict[str, Any] = {}
@@ -93,4 +95,5 @@ def build_shape_function_model(
         backbone_name=backbone_name,
         feature_dim=feature_dim,
         backbone_kwargs=backbone_kwargs,
+        head_kwargs=head_kwargs,
     )
