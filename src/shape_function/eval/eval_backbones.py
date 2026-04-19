@@ -18,14 +18,26 @@ def evaluate_model(
     summary: dict[str, float] = {}
     count = 0
     for batch in loader:
+        X = batch["X"].to(device)
+        x_q = batch["x_q"].to(device)
+        beta = batch["beta"].to(device)
+        r_max = batch["r_max"].to(device)
         outputs = model(
-            batch["X"].to(device),
-            batch["x_q"].to(device),
-            batch["beta"].to(device),
+            X,
+            x_q,
+            beta,
             rho_q=batch["rho_q"].to(device) if batch["rho_q"].shape[-1] > 0 else None,
         )
         phi_ref = batch["phi_ref"].to(device) if "phi_ref" in batch else None
-        metrics = compute_batch_metrics(outputs, phi_ref, compute_teacher_metrics=compute_teacher_metrics and phi_ref is not None)
+        metrics = compute_batch_metrics(
+            outputs,
+            phi_ref,
+            X=X,
+            x_q=x_q,
+            r_max=r_max,
+            patch_type=batch.get("patch_type"),
+            compute_teacher_metrics=compute_teacher_metrics and phi_ref is not None,
+        )
         for key, value in metrics.items():
             summary[key] = summary.get(key, 0.0) + value
         count += 1

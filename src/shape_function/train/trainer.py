@@ -63,6 +63,7 @@ def _epoch_pass(
         x_q = _move_batch_tensor(batch, "x_q", device)
         beta = _move_batch_tensor(batch, "beta", device)
         rho_q = _move_batch_tensor(batch, "rho_q", device)
+        r_max = _move_batch_tensor(batch, "r_max", device)
         phi_ref = _move_batch_tensor(batch, "phi_ref", device) if "phi_ref" in batch else None
         outputs = model(X, x_q, beta, rho_q=rho_q if rho_q.shape[-1] > 0 else None)
         losses = compute_losses(
@@ -74,7 +75,15 @@ def _epoch_pass(
             loss_mode=loss_mode,
             **loss_weights,
         )
-        metrics = compute_batch_metrics(outputs, phi_ref, compute_teacher_metrics=compute_teacher_metrics and phi_ref is not None)
+        metrics = compute_batch_metrics(
+            outputs,
+            phi_ref,
+            X=X,
+            x_q=x_q,
+            r_max=r_max,
+            patch_type=batch.get("patch_type"),
+            compute_teacher_metrics=compute_teacher_metrics and phi_ref is not None,
+        )
         if train_mode:
             optimizer.zero_grad()
             losses["total"].backward()
