@@ -111,3 +111,48 @@ def test_reproducing_correction_does_not_renormalize_after_b4() -> None:
         eps_reg=1.0e-16,
     )
     assert torch.allclose(result["phi_corr"].sum(dim=-1), torch.ones(1, dtype=torch.float64), atol=1.0e-10)
+
+
+def test_order1_reports_true_second_order_residual_not_synthetic_zero() -> None:
+    phi_base, X, x_q, r_max = _sample_patch()
+    result = apply_reproducing_correction(
+        phi_base,
+        X,
+        x_q,
+        r_max,
+        basis_order=1,
+        fallback_mode="hard",
+        eps_reg=1.0e-16,
+    )
+    assert torch.max(result["reproducing_residual_const"]).item() < 1.0e-10
+    assert torch.max(result["reproducing_residual_linear"]).item() < 1.0e-10
+    assert torch.max(result["reproducing_residual_quadratic"]).item() > 1.0e-3
+
+
+def test_second_order_fallback_reports_true_order1_quadratic_residual() -> None:
+    phi_base, X, x_q, r_max = _sample_patch()
+    fallback = apply_reproducing_correction(
+        phi_base,
+        X,
+        x_q,
+        r_max,
+        basis_order=2,
+        kappa_max=1.0,
+        fallback_mode="hard",
+        eps_reg=1.0e-16,
+    )
+    order1 = apply_reproducing_correction(
+        phi_base,
+        X,
+        x_q,
+        r_max,
+        basis_order=1,
+        fallback_mode="hard",
+        eps_reg=1.0e-16,
+    )
+    assert bool(fallback["fallback_mask"].all().item())
+    assert torch.allclose(
+        fallback["reproducing_residual_quadratic"],
+        order1["reproducing_residual_quadratic"],
+    )
+    assert torch.max(fallback["reproducing_residual_quadratic"]).item() > 1.0e-3

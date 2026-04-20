@@ -72,16 +72,33 @@ def _load_yaml(path: Path) -> dict[str, Any]:
     return payload
 
 
-def resolve_basis_node_index(patch: dict[str, Any], node_index: int | None = None) -> int:
-    phi_ref = np.asarray(patch["phi_ref"], dtype=np.float64)
-    if phi_ref.ndim != 1 or phi_ref.size == 0:
-        raise ValueError("patch must contain a non-empty 1D phi_ref for basis node selection")
-    if node_index is None:
-        return int(np.argmax(phi_ref))
-    resolved = int(node_index)
-    if resolved < 0 or resolved >= phi_ref.shape[0]:
-        raise ValueError(f"node_index {resolved} is out of range for patch of size {phi_ref.shape[0]}")
-    return resolved
+def resolve_basis_node_index(
+    patch: dict[str, Any],
+    node_index: int | None = None,
+    *,
+    fallback_values: np.ndarray | None = None,
+) -> int:
+    if node_index is not None:
+        resolved = int(node_index)
+        basis_size = int(np.asarray(patch["X"], dtype=np.float64).shape[0])
+        if resolved < 0 or resolved >= basis_size:
+            raise ValueError(f"node_index {resolved} is out of range for patch of size {basis_size}")
+        return resolved
+
+    if "phi_ref" in patch:
+        phi_ref = np.asarray(patch["phi_ref"], dtype=np.float64)
+        if phi_ref.ndim == 1 and phi_ref.size > 0:
+            return int(np.argmax(phi_ref))
+
+    if fallback_values is not None:
+        values = np.asarray(fallback_values, dtype=np.float64)
+        if values.ndim == 1 and values.size > 0:
+            return int(np.argmax(values))
+
+    X = np.asarray(patch["X"], dtype=np.float64)
+    x_q = np.asarray(patch["x_q"], dtype=np.float64)
+    distances = np.linalg.norm(X - x_q[None, :], axis=1)
+    return int(np.argmin(distances))
 
 
 def _resolve_device(requested_device: str) -> str:
@@ -130,10 +147,17 @@ def _build_model(snapshot: dict[str, Any], checkpoint_path: Path, device: str) -
     return model
 
 
-def _predict_patch(model: torch.nn.Module, patch: dict[str, Any], device: str) -> dict[str, Any]:
+def _predict_patch(
+    model: torch.nn.Module,
+    patch: dict[str, Any],
+    device: str,
+    *,
+    prior_type: str = "gaussian",
+) -> dict[str, Any]:
     X = torch.as_tensor(np.asarray(patch["X"]), dtype=torch.float64, device=device).unsqueeze(0)
     x_q = torch.as_tensor(np.asarray(patch["x_q"]), dtype=torch.float64, device=device).unsqueeze(0)
-    beta = torch.as_tensor([[float(patch["beta"])]], dtype=torch.float64, device=device)
+    beta_value = float(patch["beta"])
+    beta = torch.as_tensor([[beta_value]], dtype=torch.float64, device=device)
     rho_q_value = np.asarray(patch.get("rho_q", np.zeros((0,), dtype=np.float64)), dtype=np.float64)
     rho_q = None
     if rho_q_value.size > 0:
@@ -142,7 +166,18 @@ def _predict_patch(model: torch.nn.Module, patch: dict[str, Any], device: str) -
         outputs = model(X, x_q, beta, rho_q=rho_q)
     phi_pred = outputs["phi_corr"][0].detach().cpu().numpy()
     phi_base = outputs["phi_base"][0].detach().cpu().numpy()
-    phi_ref = np.asarray(patch["phi_ref"], dtype=np.float64)
+    phi_ref = patch.get("phi_ref")
+    if phi_ref is None:
+        teacher = solve_maxent_patch(
+            np.asarray(patch["x_q"], dtype=np.float64),
+            np.asarray(patch["X"], dtype=np.float64),
+            beta_value,
+            prior_type=prior_type,
+        )
+        if not teacher["success"]:
+            raise RuntimeError("teacher solve failed while preparing visualization reference")
+        phi_ref = teacher["phi_ref"]
+    phi_ref = np.asarray(phi_ref, dtype=np.float64)
     abs_err = np.abs(phi_pred - phi_ref)
     denom = max(float(np.linalg.norm(phi_ref)), 1.0e-12)
     aux = outputs["aux"]
@@ -151,6 +186,7 @@ def _predict_patch(model: torch.nn.Module, patch: dict[str, Any], device: str) -
     return {
         "phi_pred": phi_pred,
         "phi_base": phi_base,
+        "phi_ref": phi_ref,
         "relative_l2": float(np.linalg.norm(phi_pred - phi_ref) / denom),
         "global_linf": float(abs_err.max()),
         "neg_fraction": float(np.mean(phi_pred < 0.0)),
@@ -206,10 +242,15 @@ def compute_basis_field(
     prior_type: str = "gaussian",
     grid_size: int = 60,
     node_index: int | None = None,
+    fallback_values: np.ndarray | None = None,
 ) -> dict[str, Any]:
     X = np.asarray(patch["X"], dtype=np.float64)
     beta = float(patch["beta"])
-    resolved_node_index = resolve_basis_node_index(patch, node_index=node_index)
+    resolved_node_index = resolve_basis_node_index(
+        patch,
+        node_index=node_index,
+        fallback_values=fallback_values,
+    )
     grid_x, grid_y, valid_mask = _build_query_grid_from_nodes(X, grid_size=grid_size)
     teacher_field = np.full_like(grid_x, np.nan, dtype=np.float64)
     pred_field = np.full_like(grid_x, np.nan, dtype=np.float64)
@@ -273,7 +314,7 @@ def save_patch_visualization(
     output_path.parent.mkdir(parents=True, exist_ok=True)
     X = np.asarray(patch["X"], dtype=np.float64)
     x_q = np.asarray(patch["x_q"], dtype=np.float64)
-    phi_ref = np.asarray(patch["phi_ref"], dtype=np.float64)
+    phi_ref = np.asarray(prediction.get("phi_ref", patch.get("phi_ref")), dtype=np.float64)
     phi_pred = np.asarray(prediction["phi_pred"], dtype=np.float64)
     distances = np.linalg.norm(X - x_q[None, :], axis=1)
     sort_idx = np.argsort(distances)
@@ -469,7 +510,7 @@ def save_patch_field_visualization(
 ) -> Path:
     output_path.parent.mkdir(parents=True, exist_ok=True)
     X = np.asarray(patch["X"], dtype=np.float64)
-    phi_ref = np.asarray(patch["phi_ref"], dtype=np.float64)
+    phi_ref = np.asarray(prediction.get("phi_ref", patch.get("phi_ref")), dtype=np.float64)
     phi_pred = np.asarray(prediction["phi_pred"], dtype=np.float64)
     abs_err = np.abs(phi_pred - phi_ref)
     rel_err = _masked_relative_error(phi_pred, phi_ref)
@@ -729,12 +770,20 @@ def save_training_curves_visualization(output_path: Path, curves: dict[str, np.n
     output_path.parent.mkdir(parents=True, exist_ok=True)
     epochs = np.asarray(curves.get("epoch", np.arange(1, len(curves.get("lr", [])) + 1)), dtype=np.float64)
     fig, axes = plt.subplots(2, 2, figsize=(12, 9), constrained_layout=True)
-    panels = [
-        ("train_total", "val_total", "Total Loss", "loss"),
-        ("train_relative_l2", "val_relative_l2", "Relative L2", "relative_l2"),
-        ("train_loss_data", "val_loss_data", "Data Loss", "loss_data"),
-        ("lr", None, "Learning Rate", "lr"),
-    ]
+    if "train_relative_l2" in curves or "val_relative_l2" in curves:
+        panels = [
+            ("train_total", "val_total", "Total Loss", "loss"),
+            ("train_relative_l2", "val_relative_l2", "Relative L2", "relative_l2"),
+            ("train_loss_data", "val_loss_data", "Data Loss", "loss_data"),
+            ("lr", None, "Learning Rate", "lr"),
+        ]
+    else:
+        panels = [
+            ("train_total", "val_total", "Total Loss", "loss"),
+            ("train_base_linear_residual", "val_base_linear_residual", "Base Linear Residual", "residual"),
+            ("train_mean_quad_residual", "val_mean_quad_residual", "Quadratic Residual", "residual"),
+            ("lr", None, "Learning Rate", "lr"),
+        ]
     for ax, (train_key, val_key, title, ylabel) in zip(axes.flat, panels):
         if train_key in curves:
             ax.plot(epochs, curves[train_key], marker="o", linewidth=1.8, label=train_key)
@@ -785,8 +834,20 @@ def generate_run_visualizations(
     model = _build_model(snapshot, checkpoint_path, resolved_device)
     dataset = _build_val_dataset(snapshot)
     records: list[dict[str, Any]] = []
+    skipped_indices: list[int] = []
     for index, patch in enumerate(dataset):
-        prediction = _predict_patch(model, patch, resolved_device)
+        try:
+            prediction = _predict_patch(
+                model,
+                patch,
+                resolved_device,
+                prior_type=str(snapshot["resolved"].get("prior_type", "gaussian")),
+            )
+        except RuntimeError as exc:
+            if "teacher solve failed" in str(exc):
+                skipped_indices.append(index)
+                continue
+            raise
         records.append(
             {
                 "index": index,
@@ -800,15 +861,18 @@ def generate_run_visualizations(
                 "prediction": prediction,
             }
         )
+    if not records:
+        raise RuntimeError("no visualizable patches were found because teacher reference reconstruction failed")
     scores = [record["relative_l2"] for record in records]
-    selected_indices = select_patch_indices(scores, num_patches=num_patches, strategy=selection)
+    selected_positions = select_patch_indices(scores, num_patches=min(num_patches, len(records)), strategy=selection)
     output_dir = resolved_run_dir / "figures" / "shape_function_samples"
     output_dir.mkdir(parents=True, exist_ok=True)
     saved_figures: list[str] = []
     selected_records: list[dict[str, Any]] = []
-    for order, dataset_index in enumerate(selected_indices, start=1):
+    for order, record_position in enumerate(selected_positions, start=1):
+        record = records[record_position]
+        dataset_index = int(record["index"])
         patch = dataset[dataset_index]
-        record = records[dataset_index]
         figure_name = (
             f"{order:02d}_{selection}_{view}_idx{dataset_index:04d}_{record['patch_type']}"
             f"_relL2_{record['relative_l2']:.4f}.png"
@@ -833,6 +897,7 @@ def generate_run_visualizations(
                 prior_type=str(snapshot["resolved"].get("prior_type", "gaussian")),
                 grid_size=grid_size,
                 node_index=node_index,
+                fallback_values=record["prediction"]["phi_pred"],
             )
             save_basis_field_visualization(
                 figure_path,
@@ -854,6 +919,9 @@ def generate_run_visualizations(
         "view": view,
         "num_patches": int(num_patches),
         "num_available": int(len(dataset)),
+        "num_visualizable": int(len(records)),
+        "num_skipped_teacher_failures": int(len(skipped_indices)),
+        "skipped_teacher_failure_indices": skipped_indices,
         "rel_error_floor": REL_ERROR_FLOOR,
         "rel_error_clip": REL_ERROR_CLIP,
         "figures": saved_figures,

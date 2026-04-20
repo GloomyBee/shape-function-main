@@ -1,0 +1,21 @@
+model:
+  backbone: kernel_operator
+  hidden_dim: 64
+  num_layers: 2
+  feature_mode: minimal
+train:
+  batch_size: 32
+  epochs: 10
+  learning_rate: 0.001
+  prior_type: gaussian
+head:
+  basis_order: 2
+  kappa_max: 1000000.0
+  fallback_mode: hard
+loss:
+  mode: unsupervised_v1
+  lambda_base_lin: 1.0
+  lambda_ent: 0.01
+  lambda_neg: 0.00001
+eval:
+  compute_teacher_metrics: false

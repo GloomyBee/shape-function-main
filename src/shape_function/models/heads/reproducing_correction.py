@@ -41,6 +41,22 @@ def _solve_reproducing_system(
     }
 
 
+def _final_reproducing_residuals(
+    phi: torch.Tensor,
+    X: torch.Tensor,
+    x_q: torch.Tensor,
+    r_max: torch.Tensor,
+) -> dict[str, torch.Tensor]:
+    basis = build_query_centered_polynomial_basis_2d(X, x_q, r_max, order=2)
+    target = _basis_eval_at_query(X.shape[0], order=2, dtype=X.dtype, device=X.device)
+    residual = torch.einsum("bk,bki->bi", phi, basis) - target
+    return {
+        "const": torch.abs(residual[..., 0]),
+        "linear": torch.linalg.norm(residual[..., 1:3], dim=-1),
+        "quadratic": torch.linalg.norm(residual[..., 3:], dim=-1),
+    }
+
+
 def apply_linear_reproducing_correction(
     phi_base: torch.Tensor,
     X: torch.Tensor,
@@ -69,9 +85,7 @@ def apply_reproducing_correction(
 
     order1 = _solve_reproducing_system(phi_base, X, x_q, r_max, order=1, eps_reg=eps_reg)
     if basis_order == 1:
-        residual_const = torch.abs(order1["residual_vector"][..., 0])
-        residual_linear = torch.linalg.norm(order1["residual_vector"][..., 1:3], dim=-1)
-        zeros = torch.zeros_like(residual_const)
+        residuals = _final_reproducing_residuals(order1["phi_corr"], X, x_q, r_max)
         return {
             "phi_corr": order1["phi_corr"],
             "phi_corr_order1": order1["phi_corr"],
@@ -80,9 +94,9 @@ def apply_reproducing_correction(
             "cond_M": order1["cond_M"],
             "cond_M2": order1["cond_M"],
             "fallback_mask": torch.zeros_like(order1["cond_M"], dtype=torch.bool),
-            "reproducing_residual_const": residual_const,
-            "reproducing_residual_linear": residual_linear,
-            "reproducing_residual_quadratic": zeros,
+            "reproducing_residual_const": residuals["const"],
+            "reproducing_residual_linear": residuals["linear"],
+            "reproducing_residual_quadratic": residuals["quadratic"],
         }
 
     if kappa_max is None:
@@ -90,21 +104,7 @@ def apply_reproducing_correction(
     order2 = _solve_reproducing_system(phi_base, X, x_q, r_max, order=2, eps_reg=eps_reg)
     fallback_mask = order2["cond_M"] > float(kappa_max)
     phi_corr = torch.where(fallback_mask[:, None], order1["phi_corr"], order2["phi_corr"])
-    residual_const = torch.where(
-        fallback_mask,
-        torch.abs(order1["residual_vector"][..., 0]),
-        torch.abs(order2["residual_vector"][..., 0]),
-    )
-    residual_linear = torch.where(
-        fallback_mask,
-        torch.linalg.norm(order1["residual_vector"][..., 1:3], dim=-1),
-        torch.linalg.norm(order2["residual_vector"][..., 1:3], dim=-1),
-    )
-    residual_quadratic = torch.where(
-        fallback_mask,
-        torch.zeros_like(order1["cond_M"]),
-        torch.linalg.norm(order2["residual_vector"][..., 3:], dim=-1),
-    )
+    residuals = _final_reproducing_residuals(phi_corr, X, x_q, r_max)
     return {
         "phi_corr": phi_corr,
         "phi_corr_order1": order1["phi_corr"],
@@ -113,7 +113,7 @@ def apply_reproducing_correction(
         "cond_M": order2["cond_M"],
         "cond_M2": order2["cond_M"],
         "fallback_mask": fallback_mask,
-        "reproducing_residual_const": residual_const,
-        "reproducing_residual_linear": residual_linear,
-        "reproducing_residual_quadratic": residual_quadratic,
+        "reproducing_residual_const": residuals["const"],
+        "reproducing_residual_linear": residuals["linear"],
+        "reproducing_residual_quadratic": residuals["quadratic"],
     }
