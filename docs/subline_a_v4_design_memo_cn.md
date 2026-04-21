@@ -60,11 +60,12 @@ v3 阶段已经落地的正确决策：
 - **后果**：推理时点云整体旋转后特征分布变化，backbone 没理由保持一致。
 - **表述纪律**：本 memo 采用 "rotation augmentation for robustness"，**不**主张 "rotation invariance achieved"。后者需要等变结构，留作未来工作。
 
-### Gap-3：尺度归一不够"算子化"（隐藏 gap）
+### Gap-3：尺度语义仍需澄清，但坐标归一化本身已落地
 
-- **现象**：B4 用 `r_max` 归一化基底；但 backbone 看到的特征是 `[rel_hat, |rel_hat|, β, (rho_q)]`，其中 `rel_hat = X - x_q` **并未用 `r_max` 或局部平均节点间距归一**。β 虽然传入，但它是 teacher max-ent 的温度参数，不是长度尺度的无量纲化量。
-- **后果**：backbone 仍然隐式看到绝对尺度。换一个支撑半径或密度的点云，同一个局部几何关系会产生不同的 `rel_hat` 数值，网络只能靠训练分布内的点云尺度记忆去对应。
-- **与 OOD 的呼应**：这是"尺度外推 OOD 实验"之所以必要的直接原因。
+- **核查结论**：当前代码已经在数据侧和模型侧同时使用 query-centered + `r_max` 归一化坐标。`feature_builder.py` 里的 `rel_hat = (X - x_q) / r_max` 会写入 `node_features` 与 `rel_coords`；`full_model.py` 里 `rel_coords_and_radius_torch` 也按同一公式构造 `rel_hat` 后送入 backbone。
+- **因此已关闭的部分**：此前把"backbone 直接看到带量纲坐标"列为 Gap-3 的判断是过期的。至少在当前 v3 / D1 代码线上，**原始坐标尺度并没有直接泄漏给 backbone**。
+- **仍然存在的问题**：Scale-OOD 依然必要，但它测的已经不是"坐标没归一导致的尺度泄漏"，而是 **β / 支撑窗宽 / 局部核参数语义外推**。也就是说，剩余的尺度问题在 teacher prior 与 kernel 宽度语义层，而不在 `rel_hat` 的几何归一层。
+- **工程动作**：本阶段不再为 Gap-3 添加新业务代码，只补回归测试锁定这一不变量，防止后续误改。
 
 ### Gap-4：边界信息零输入
 
@@ -131,24 +132,23 @@ v3 阶段已经落地的正确决策：
 
 **风险**：无。这是纯数据增强。
 
-### 4.4 Gap-3：尺度归一 backbone 输入
+### 4.4 Gap-3：把尺度归一改写为“已验证不变量”
 
-**改动**（`src/shape_function/models/full_model.py:14`）：
+**现状**：
+- `src/shape_function/data/feature_builder.py` 已经输出 `rel_hat = (X - x_q) / r_max`
+- `src/shape_function/utils/geometry.py` 与 `src/shape_function/models/full_model.py` 也已经在在线前向里使用同一 `rel_hat`
 
-```python
-def build_node_features_torch(rel_hat, beta, r_max, rho_q=None):
-    scale = r_max.clamp_min(1e-12).unsqueeze(-1)  # [B, 1, 1]
-    rel_tilde = rel_hat / scale                    # 无量纲相对坐标
-    dist_tilde = torch.linalg.norm(rel_tilde, dim=-1, keepdim=True)
-    features = [rel_tilde, dist_tilde, beta_feat]
-    ...
-```
+**本阶段动作**：
+- 不新增业务代码
+- 新增回归测试，锁定：
+  - `rel_coords_and_radius_torch` 必须返回 `rel_hat = rel / r_max`
+  - `build_patch_features(..., feature_mode="minimal")` 的前两列必须等于 `rel_hat`
+  - `dist_hat` 必须等于 `||rel_hat||`
 
-命名上把 `rel_hat` 保留给"带量纲相对坐标"，`rel_tilde` 表示"无量纲"。head 的 B4 本来就用 `r_max` 归一化，这一改动是把这种做法**向前推到 backbone 入口**。
-
-**一致性检查**：训练时 `r_max` 来自 patch 生成时保存的字段；推理时走 `rel_coords_and_radius_torch` 同一公式。单位应该唯一。
-
-**风险**：会改变 backbone 的输入分布，**A3 三组必须重跑**。
+**重新归类后的结论**：
+- Gap-3 不再是“待实现的代码改造”
+- 它现在是一个**已完成、需文档校准并用测试锁住的实现不变量**
+- Scale-OOD 保留，但解释口径改为“β / 支撑窗宽外推”，不是“坐标尺度泄漏”
 
 ### 4.5 Gap-4：边界特征（三维最小集）
 
@@ -172,7 +172,7 @@ def build_node_features_torch(rel_hat, beta, r_max, rho_q=None):
 
 | 组 | 旋转增强 | k 分布 | 输入特征 | 备注 |
 |---|---------|-------|---------|-----|
-| v4-A 消融：仅尺度归一 | ❌ | k=16 固定 | 含 rel_tilde，无边界 | 验证 Gap-3 独立收益 |
+| v4-A 消融：固定 k 基线 | ❌ | k=16 固定 | 无边界特征 | 作为 D1 固定-k 基线 |
 | v4-B 消融：加旋转 | ✅ | k=16 固定 | 含 rel_tilde，无边界 | 叠加 Gap-2 |
 | v4-C 消融：加变 k | ✅ | k ∈ [12,24] | 含 rel_tilde，无边界 | 叠加 Gap-1 |
 | **v4-Full** | ✅ | k ∈ [12,24] | 含 rel_tilde + 边界特征 | 最终版本 |
@@ -203,6 +203,18 @@ def build_node_features_torch(rel_hat, beta, r_max, rho_q=None):
 
 ### 负值可控性
 7. `max_negative_magnitude` < 0.5（当前 v3 Target 是 1.78，是主要副作用）
+
+### OOD 分层硬基线：来自 v3 `a3_target_unsup_o2_quadfix`
+
+D0' OOD baseline 已经证明：v3 的主要失败点不是旋转，而是病态局部几何。v4-Full 不仅要在 IID 上优于 v3，更要优先打掉下面两类高风险 patch 的 correction 过强现象。
+
+| 协议 / patch type | v3 `relative_correction_strength` | v3 `max_negative_magnitude` | v4-Full 目标 |
+|---|---:|---:|---|
+| `loto_anisotropic` | 7.38 | 8.75 | `relative_correction_strength < 2.0` |
+| `loto_sparse_dense_transition` | 39.3 | 106.6 | `relative_correction_strength < 5.0`, `max_negative_magnitude < 10` |
+
+这组分层阈值的含义是：即使 IID 指标已经看起来稳定，只要 anisotropic / sparse-dense transition 上仍然需要超强 B4 投影，论文就不能声称“跨 patch 分布可泛化”。这两类 patch 才是当前 v4 必须击败的主战场。
+
 
 **关键判据（最终主张）**：
 > v4-Full 在所有 6 项 OOD 协议下，上述 7 个指标的退化均未超出阈值，且明显优于 v4-A/B/C 消融组。
