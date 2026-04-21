@@ -46,6 +46,12 @@ def compute_batch_metrics(
 ) -> dict[str, float]:
     aux = outputs["aux"]
     mean_quad_residual = torch.mean(aux["reproducing_residual_quadratic"])
+    phi_corr = outputs["phi_corr"]
+    phi_base = outputs["phi_base"]
+    corr_diff = phi_corr - phi_base
+    relative_correction_strength = torch.linalg.norm(corr_diff, dim=-1) / torch.linalg.norm(
+        phi_base, dim=-1
+    ).clamp_min(1.0e-12)
     metrics = {
         "base_linear_residual": float(torch.mean(aux["base_linear_residual"]).detach().cpu()),
         "mean_pou_residual": float(torch.mean(torch.abs(aux["sum_phi"] - 1.0)).detach().cpu()),
@@ -65,12 +71,12 @@ def compute_batch_metrics(
         "mean_cond_M": float(torch.mean(aux["cond_M"]).detach().cpu()),
         "p95_cond_M": float(torch.quantile(aux["cond_M"], 0.95).detach().cpu()),
         "worst_cond_M": float(torch.max(aux["cond_M"]).detach().cpu()),
+        "relative_correction_strength": float(torch.mean(relative_correction_strength).detach().cpu()),
     }
     _add_fallback_by_type(metrics, aux["fallback_mask"], patch_type)
     if phi_ref is not None and compute_teacher_metrics:
         if X is None or x_q is None or r_max is None:
             raise ValueError("teacher metrics require X, x_q, and r_max")
-        phi_corr = outputs["phi_corr"]
         diff = phi_corr - phi_ref
         denom = torch.linalg.norm(phi_ref, dim=-1).clamp_min(1.0e-12)
         relative_l2 = torch.mean(torch.linalg.norm(diff, dim=-1) / denom)

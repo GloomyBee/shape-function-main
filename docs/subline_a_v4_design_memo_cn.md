@@ -25,6 +25,8 @@
 3. **方法目标**：我们不追求"一个适配所有点云实例的全局网络"，而是追求"一个对广泛局部 patch 分布族可泛化的局部生成器 / warm starter"。这里明确写"广泛 patch 分布族"，不写"任意 patch 全覆盖"，因为病态 patch 仍应由检测、fallback 或拒判机制处理。
 4. **当前尚待证明**：上述三点目前是方法定位与研究假设，不是既成结论。要让它们成立，必须通过 OOD 协议证明跨 patch 分布泛化，通过下游 wall-clock 与收敛实验证明 warm-start / accelerator 的实际价值。
 
+DeepSets-style backbone 是这一重述下的一个具体落地选项：它把局部 patch 视为无序集合，输出 permutation-equivariant 的 per-node logits，从结构上服务于“固定点云记忆”到“局部 patch 算子学习”的转向。详细方案见 `docs/subline_a_v4_deepsets_plan_cn.md`。
+
 不回答的问题：二阶一致性能否通过网络学出来。本阶段仍然把二阶交给 B4 结构层。
 
 ---
@@ -185,7 +187,7 @@ def build_node_features_torch(rel_hat, beta, r_max, rho_q=None):
 
 ## 6. 成功判据
 
-不只是 MSE。本阶段要同时报以下 6 个量，每一项都有明确阈值。
+不只是 MSE。本阶段要同时报以下 7 个量，每一项都有明确阈值。
 
 ### 数值性质（结构约束是否仍然成立）
 1. `mean_pou_residual` < 1e-8（所有组、所有协议）
@@ -193,14 +195,17 @@ def build_node_features_torch(rel_hat, beta, r_max, rho_q=None):
 3. `mean_quad_residual` < 1e-6（仅二阶 B4 组）
 4. `fallback_rate` < 5%（按 patch_type 分层报告）
 
-### 训练有效性
+### 训练有效性（backbone 是否真的学到好的 base measure）
 5. `base_linear_residual` 在 Full 组 IID 上 < 1e-2（当前 v3 Target 是 3.2e-2；这是泛化主张的"底力"）
+6. `relative_correction_strength = ‖φ_corr − φ_base‖₂ / (‖φ_base‖₂ + ε)` 在 Full 组 IID 上 < 0.3
+
+第 6 条的理由：B4 总能把最终 residual 修到数值零，只看 `mean_quad_residual` 无法区分"base 已经好"和"base 很差但被硬投影"。`relative_correction_strength` 直接测量"backbone 有多依赖 B4 兜底"——v3 Target 的 `max_neg = 1.777` 现象本质就是 correction 过强，这个量会比 residual 更早暴露 backbone 的学习质量问题。
 
 ### 负值可控性
-6. `max_negative_magnitude` < 0.5（当前 v3 Target 是 1.78，是主要副作用）
+7. `max_negative_magnitude` < 0.5（当前 v3 Target 是 1.78，是主要副作用）
 
 **关键判据（最终主张）**：
-> v4-Full 在所有 6 项 OOD 协议下，上述 6 个指标的退化均未超出阈值，且明显优于 v4-A/B/C 消融组。
+> v4-Full 在所有 6 项 OOD 协议下，上述 7 个指标的退化均未超出阈值，且明显优于 v4-A/B/C 消融组。
 
 只有这一条满足，才能在论文里写"该 patch-level operator 无需重训即可应用到 OOD 点云"。
 

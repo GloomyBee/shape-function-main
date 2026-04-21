@@ -22,8 +22,12 @@ def _base_aux() -> dict[str, torch.Tensor]:
 
 
 def test_second_order_metrics_aggregate_structure_terms() -> None:
-    metrics = compute_batch_metrics({"aux": _base_aux(), "phi_corr": torch.ones(2, 3, dtype=torch.float64) / 3.0})
+    phi_base = torch.tensor([[0.5, 0.25, 0.25], [0.25, 0.25, 0.5]], dtype=torch.float64)
+    phi_corr = torch.ones(2, 3, dtype=torch.float64) / 3.0
+    metrics = compute_batch_metrics({"aux": _base_aux(), "phi_base": phi_base, "phi_corr": phi_corr})
     assert "mean_quad_residual" in metrics
+    assert "relative_correction_strength" in metrics
+    assert metrics["relative_correction_strength"] > 0.0
     assert "fallback_rate" in metrics
     assert metrics["fallback_rate"] == 0.5
     assert metrics["worst_cond_M"] == 100.0
@@ -39,7 +43,7 @@ def test_teacher_quad_residual_and_quad_gain_are_independent_of_student_aux() ->
     phi_ref = torch.tensor([[1.0, 0.0, 0.0], [0.5, 0.25, 0.25]], dtype=torch.float64)
     phi_corr = torch.ones((2, 3), dtype=torch.float64) / 3.0
     metrics = compute_batch_metrics(
-        {"aux": _base_aux(), "phi_corr": phi_corr},
+        {"aux": _base_aux(), "phi_base": phi_corr, "phi_corr": phi_corr},
         phi_ref,
         X=X,
         x_q=x_q,
@@ -52,7 +56,11 @@ def test_teacher_quad_residual_and_quad_gain_are_independent_of_student_aux() ->
 
 def test_fallback_rate_is_reported_by_patch_type() -> None:
     metrics = compute_batch_metrics(
-        {"aux": _base_aux(), "phi_corr": torch.ones(2, 3, dtype=torch.float64) / 3.0},
+        {
+            "aux": _base_aux(),
+            "phi_base": torch.ones(2, 3, dtype=torch.float64) / 3.0,
+            "phi_corr": torch.ones(2, 3, dtype=torch.float64) / 3.0,
+        },
         patch_type=["uniform", "clustered"],
     )
     assert metrics["fallback_rate_by_type_uniform"] == 0.0

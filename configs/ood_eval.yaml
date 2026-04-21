@@ -1,0 +1,22 @@
+seed: 1042
+defaults:
+  num_patches: 128
+  batch_size: 64
+  compute_teacher_metrics: false
+protocols:
+  iid:
+    enabled: true
+  loto:
+    enabled: true
+  rotation:
+    enabled: true
+    angles: [45, 90, 180]
+  k_ood:
+    enabled: true
+    k_values: [12, 24, 32]
+  scale:
+    enabled: true
+    beta_ranges:
+      - [8.0, 16.0]
+  boundary:
+    enabled: true

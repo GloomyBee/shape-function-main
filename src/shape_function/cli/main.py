@@ -8,12 +8,14 @@ from typing import Sequence
 
 from shape_function.cli.config import ConfigError
 from shape_function.cli.train import add_train_subparser
+from shape_function.eval.ood_eval import add_ood_eval_subparser
 
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="shape-function", description="shape_function experiment CLI")
     subparsers = parser.add_subparsers(dest="command", required=True)
     add_train_subparser(subparsers)
+    add_ood_eval_subparser(subparsers)
     return parser
 
 
