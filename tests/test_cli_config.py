@@ -148,3 +148,54 @@ def test_resolve_train_config_requires_kappa_max_for_second_order(tmp_path: Path
     )
     with pytest.raises(ConfigError, match="kappa_max"):
         resolve_train_config(data_path, train_path)
+
+
+def test_deepsets_train_config_is_accepted(tmp_path: Path) -> None:
+    data_path = tmp_path / "data.yaml"
+    train_path = tmp_path / "train.yaml"
+    data_path.write_text(
+        "\n".join(
+            [
+                "seed: 1",
+                "num_train: 2",
+                "num_val: 1",
+                "k_neighbors: 16",
+                "beta_range: [0.5, 1.0]",
+                "feature_mode: minimal",
+                "patch_types:",
+                "  - uniform",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    train_path.write_text(
+        "\n".join(
+            [
+                "model:",
+                "  backbone: deepsets",
+                "  hidden_dim: 8",
+                "  num_layers: 2",
+                "  feature_mode: minimal",
+                "train:",
+                "  batch_size: 2",
+                "  epochs: 1",
+                "  learning_rate: 0.001",
+                "  prior_type: gaussian",
+                "head:",
+                "  basis_order: 2",
+                "  kappa_max: 100000000.0",
+                "  fallback_mode: hard",
+                "loss:",
+                "  mode: unsupervised_v1",
+                "  lambda_base_lin: 1.0",
+                "  lambda_ent: 0.01",
+                "  lambda_neg: 0.00001",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    resolved = resolve_train_config(data_path, train_path)
+    assert resolved.backbone_name == "deepsets"
+    assert resolved.model["num_layers"] == 2

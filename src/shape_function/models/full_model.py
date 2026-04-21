@@ -5,6 +5,7 @@ from typing import Any
 import torch
 import torch.nn as nn
 
+from shape_function.models.backbones.deepsets import DeepSetsBackbone
 from shape_function.models.backbones.kernel_operator import KernelOperatorBackbone
 from shape_function.models.backbones.mlp_baseline import MLPBaselineBackbone
 from shape_function.models.heads.structure_head import StructurePreservingHead
@@ -41,6 +42,8 @@ class ShapeFunctionModel(nn.Module):
         resolved_backbone_kwargs = dict(backbone_kwargs or {})
         if backbone_name == "kernel_operator":
             self.backbone = KernelOperatorBackbone(input_dim=feature_dim, **resolved_backbone_kwargs)
+        elif backbone_name == "deepsets":
+            self.backbone = DeepSetsBackbone(input_dim=feature_dim, **resolved_backbone_kwargs)
         elif backbone_name == "mlp_baseline":
             self.backbone = MLPBaselineBackbone(input_dim=feature_dim, **resolved_backbone_kwargs)
         else:
@@ -85,6 +88,12 @@ def build_shape_function_model(
             backbone_kwargs["hidden_dim"] = hidden_dim
         if num_layers is not None:
             backbone_kwargs["num_layers"] = num_layers
+    elif backbone_name == "deepsets":
+        if hidden_dim is not None:
+            backbone_kwargs["hidden_dim"] = hidden_dim
+        if num_layers is not None:
+            backbone_kwargs["num_encoder_layers"] = num_layers
+            backbone_kwargs["num_decoder_layers"] = num_layers
     elif backbone_name == "mlp_baseline":
         backbone_kwargs["k_neighbors"] = k_neighbors
         if hidden_dim is not None:

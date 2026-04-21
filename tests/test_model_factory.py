@@ -39,3 +39,17 @@ def test_build_shape_function_model_propagates_mlp_params() -> None:
     assert first_linear.in_features == 48
     assert first_linear.out_features == 20
     assert last_linear.out_features == 12
+
+
+def test_build_shape_function_model_propagates_deepsets_params() -> None:
+    model = build_shape_function_model(
+        backbone_name="deepsets",
+        feature_mode="minimal",
+        hidden_dim=18,
+        num_layers=3,
+        k_neighbors=16,
+    )
+    assert model.backbone.hidden_dim == 18
+    assert model.backbone.num_encoder_layers == 3
+    assert model.backbone.num_decoder_layers == 3
+    assert model.backbone.encoder[0].in_features == 4

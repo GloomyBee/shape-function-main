@@ -32,3 +32,17 @@ def test_compute_losses_accepts_mask_legacy() -> None:
     outputs = model(X, x_q, beta)
     losses = compute_losses(outputs, phi_ref, loss_mode="legacy_teacher_baseline", mask=mask, valid_count=mask.sum())
     assert torch.isfinite(losses["total"])
+
+
+def test_deepsets_full_model_is_permutation_equivariant() -> None:
+    torch.manual_seed(5)
+    model = ShapeFunctionModel(backbone_name="deepsets", feature_dim=4, backbone_kwargs={"hidden_dim": 12}, head_kwargs={"basis_order": 2, "kappa_max": 1.0e8})
+    X = torch.rand(2, 16, 2, dtype=torch.float64)
+    x_q = torch.rand(2, 2, dtype=torch.float64)
+    beta = torch.rand(2, 1, dtype=torch.float64) + 0.5
+    permutation = torch.randperm(16)
+    outputs = model(X, x_q, beta)
+    permuted_outputs = model(X[:, permutation], x_q, beta)
+    assert torch.allclose(permuted_outputs["logits"], outputs["logits"][:, permutation], atol=1.0e-10)
+    assert torch.allclose(permuted_outputs["phi_base"], outputs["phi_base"][:, permutation], atol=1.0e-10)
+    assert torch.allclose(permuted_outputs["phi_corr"], outputs["phi_corr"][:, permutation], atol=1.0e-8)

@@ -77,8 +77,10 @@ def resolve_train_config(
             f"{feature_mode!r} != {model_payload['feature_mode']!r}"
         )
     backbone_name = str(model_payload["backbone"])
-    if backbone_name == "kernel_operator" and "num_layers" not in model_payload:
-        raise ConfigError("kernel_operator requires model.num_layers in the train config")
+    if backbone_name in {"kernel_operator", "deepsets"} and "num_layers" not in model_payload:
+        raise ConfigError(f"{backbone_name} requires model.num_layers in the train config")
+    if backbone_name not in {"kernel_operator", "deepsets", "mlp_baseline"}:
+        raise ConfigError(f"Unsupported model.backbone: {backbone_name}")
     beta_range = data_payload["beta_range"]
     if not isinstance(beta_range, (list, tuple)) or len(beta_range) != 2:
         raise ConfigError("data config field 'beta_range' must contain exactly two numbers")
