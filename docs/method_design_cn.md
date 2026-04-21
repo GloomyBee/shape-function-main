@@ -752,14 +752,20 @@ $$
 
 ### 8.6 本方法的定位
 
-总的来说，本方法不是要替代经典 meshfree 理论，而是把它的结构约束嵌入神经网络近似器中，形成一个：
+总的来说，本方法不是要替代经典 meshfree 理论，而是把它的结构约束嵌入神经网络近似器中。更准确地说，它当前应被定位为一个：
 
 - 具有局部几何归纳偏置；
 - 具有结构合法性；
-- 能够被 teacher reference 稳定监督；
-- 面向后续大变形 meshfree warm start 的局部 shape function 生成器。
+- 可被 teacher reference 或无 teacher 结构损失训练；
+- 面向后续更新拉格朗日 meshfree 分析的局部 shape function 生成器 / warm starter。
 
-这也是它与普通 operator learning 模型最根本的区别。
+这里需要特别收紧两层表述。
+
+第一，本方法的**研究对象**不是"某一批点云上的形函数拟合"，而是 query-centered 局部 patch 上的 shape-function operator learning。模型输入应只依赖局部几何及必要上下文，而不应依赖全局编号、固定点云模板或特定离散实例。
+
+第二，本方法的**研究目标**不是"训练一个适配所有点云的全局网络"，而是"训练一个对广泛局部 patch 分布族可泛化的局部生成器 / warm starter"。这里必须强调是"广泛 patch 分布族"，而不是无条件覆盖任意病态 patch；对超出分布或 moment 病态的 patch，合理做法是 fallback、拒判或交回传统构造器。
+
+因此，"面向更新拉格朗日无网格分析的局部形函数快速生成器 / warm starter"目前应被理解为**项目定位**；而"模型学到的是局部几何到 shape function 的规则，而不是某批点云样本的记忆"则应被理解为**待 OOD 泛化实验验证的核心假设**。这也是它与普通 dataset-specific surrogate 或全局 operator regressor 的根本区别。
 
 ---
 
